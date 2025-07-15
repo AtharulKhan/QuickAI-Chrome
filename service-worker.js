@@ -142,13 +142,16 @@ async function handleAIQuery(message, tabId) {
             }
         }
 
-        // Save to history
+        // Save to history with enhanced fields
         await saveToHistory({
             context: message.context,
             prompt: message.prompt,
             response: fullResponse,
             model: message.model,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            favorite: false,
+            tags: [],
+            title: ''
         });
 
         // Notify completion

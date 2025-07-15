@@ -30,6 +30,11 @@ body {
     font-weight: 600;
 }
 
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
 .icon-button {
     padding: 8px;
     background: none;
@@ -46,6 +51,142 @@ body {
 .icon-button:hover {
     background: #f3f4f6;
     border-color: #d1d5db;
+}
+
+.icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Search and Filters */
+.search-filters {
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 16px 20px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.search-bar {
+    flex: 1;
+    min-width: 250px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-icon {
+    position: absolute;
+    left: 12px;
+    color: #999;
+    pointer-events: none;
+}
+
+#search-input {
+    width: 100%;
+    padding: 8px 36px 8px 36px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#search-input:focus {
+    border-color: #833ab4;
+}
+
+.clear-search {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: #999;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.clear-search:hover {
+    background: #f3f4f6;
+}
+
+.filter-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-select {
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.filter-select:focus {
+    border-color: #833ab4;
+}
+
+/* History Stats */
+.history-stats {
+    background: #f8f9fa;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: #666;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.stats-left {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.bulk-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: #833ab4;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-link:hover {
+    background: #f3f4f6;
+}
+
+.btn-link.danger {
+    color: #d32f2f;
+}
+
+.btn-link.danger:hover {
+    background: #fee;
 }
 
 .history-container {
@@ -112,6 +253,134 @@ body {
 .history-delete-btn:hover {
     background: #fee;
     color: #d32f2f;
+}
+
+/* Favorite button */
+.history-favorite-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: #999;
+    transition: all 0.2s;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.history-favorite-btn:hover {
+    background: #fff9e6;
+    color: #f59e0b;
+}
+
+.history-favorite-btn.active {
+    color: #f59e0b;
+}
+
+/* Highlight for search matches */
+.highlight {
+    background-color: #fef3c7;
+    padding: 2px 0;
+    border-radius: 2px;
+}
+
+/* Tags */
+.history-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #e0e7ff;
+    color: #4f46e5;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tag:hover {
+    background: #c7d2fe;
+}
+
+.add-tag {
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px dashed #d1d5db;
+    color: #999;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.add-tag:hover {
+    border-color: #999;
+    color: #666;
+}
+
+.tag-remove {
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* Export dialog styles */
+.export-dialog {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    padding: 24px;
+    width: 90%;
+    max-width: 400px;
+    z-index: 1000;
+}
+
+.export-dialog h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+}
+
+.export-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.export-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.export-option input[type="radio"] {
+    margin: 0;
+}
+
+.dialog-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
 }
 
 .history-prompt {
@@ -272,4 +541,90 @@ kbd {
 
 .history-container::-webkit-scrollbar-thumb:hover {
     background: #aaa;
+}
+
+/* No results message */
+.no-results {
+    text-align: center;
+    color: #666;
+    padding: 40px 20px;
+    font-size: 14px;
+}
+
+/* History title */
+.history-title {
+    font-weight: 500;
+    color: #111;
+    margin: 8px 0 0 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: text;
+    font-size: 15px;
+}
+
+.history-title[contenteditable="true"] {
+    border: 1px solid #833ab4;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: white;
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+}
+
+/* Button styles */
+.btn-primary {
+    background: #833ab4;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.btn-primary:hover {
+    background: #6a2e91;
+}
+
+.btn-secondary {
+    background: #f3f4f6;
+    color: #333;
+    border: 1px solid #d1d5db;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+    background: #e5e7eb;
+}
+
+/* Checkbox for bulk selection */
+.history-checkbox {
+    position: absolute;
+    left: 16px;
+    top: 20px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.history-item {
+    position: relative;
+    transition: all 0.2s;
+}
+
+.history-item.selected {
+    background: #f0f4ff;
+    border: 1px solid #833ab4;
+}
+
+.selection-mode .history-item-header {
+    padding-left: 48px;
 }
