@@ -6,6 +6,9 @@ let fullContext = null;
 let conversationHistory = []; // Track conversation messages
 let originalSelection = null; // Store the original selection range
 let editableElement = null; // Store reference to editable element
+let hoveredLink = null; // Track currently hovered link
+let linkHoverTimeout = null; // Timeout for link hover delay
+let currentLinkUrl = null; // Store current link URL
 
 console.log("QuickAI content script loaded on:", window.location.href);
 
@@ -357,17 +360,20 @@ document.addEventListener("selectionchange", () => {
 });
 
 // Show floating question mark button
-function showFloatingButton() {
+function showFloatingButton(type = 'text', rect = null, data = null) {
   if (floatingButton) return;
 
   floatingButton = document.createElement("button");
   floatingButton.id = "quickai-trigger-button";
-  floatingButton.innerHTML = "?";
-  floatingButton.title = "Ask QuickAI";
+  floatingButton.className = type === 'link' ? 'quickai-link-button' : '';
+  floatingButton.innerHTML = type === 'link' ? "🔗" : "?";
+  floatingButton.title = type === 'link' ? "Summarize this link" : "Ask QuickAI";
+  floatingButton.dataset.type = type;
 
-  // Position near selection
-  const top = window.scrollY + selectionRect.bottom + 5;
-  const left = window.scrollX + selectionRect.left;
+  // Position near selection or link
+  const targetRect = rect || selectionRect;
+  const top = window.scrollY + targetRect.bottom + 5;
+  const left = window.scrollX + targetRect.left;
 
   floatingButton.style.top = `${top}px`;
   floatingButton.style.left = `${left}px`;
@@ -377,7 +383,12 @@ function showFloatingButton() {
     e.preventDefault();
     e.stopPropagation();
     hideFloatingButton();
-    createFloatingUI(selectionRect, selectedText, fullContext, editableElement);
+    
+    if (type === 'link' && data) {
+      createFloatingUIForLink(targetRect, data.url, data.text);
+    } else {
+      createFloatingUI(targetRect, selectedText, fullContext, editableElement);
+    }
   });
 
   document.body.appendChild(floatingButton);
@@ -599,6 +610,553 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
   } catch (error) {
     console.error("Error creating floating UI:", error);
     activeUI = null;
+  }
+}
+
+// Create floating UI for link summarization
+async function createFloatingUIForLink(rect, linkUrl, linkText) {
+  try {
+    if (activeUI) activeUI.remove();
+
+    const container = document.createElement("div");
+    container.id = "quickai-container";
+    container.className = "quickai-container";
+    
+    // Store link data on the container
+    container.dataset.linkUrl = linkUrl;
+    container.dataset.linkText = linkText;
+    container.dataset.isLinkSummary = "true";
+    
+    // Position near link
+    const top = window.scrollY + rect.bottom + 10;
+    const left = window.scrollX + rect.left;
+
+    container.style.top = `${top}px`;
+    container.style.left = `${left}px`;
+
+    // Load available models and last selected model
+    const models = await getModels();
+    let lastModel = null;
+    try {
+      const result = await chrome.storage.sync.get("lastModel");
+      lastModel = result.lastModel;
+    } catch (error) {
+      console.warn("Could not access chrome.storage:", error);
+    }
+    const defaultModel = lastModel || models[0]?.id || "google/gemini-2.5-flash";
+
+    container.innerHTML = `
+      <div class="quickai-gradient-border"></div>
+      <div class="quickai-content">
+        <div class="quickai-header">
+          <span class="quickai-title">QuickAI - Link Summary</span>
+          <div class="quickai-header-buttons">
+            <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
+            <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
+            <button id="quickai-close" class="quickai-close">&times;</button>
+          </div>
+        </div>
+        <div class="quickai-context quickai-link-context">
+          <strong>Link:</strong> <a href="${escapeHtml(linkUrl)}" target="_blank" class="quickai-context-link">${escapeHtml(
+            linkText.length > 50 ? linkText.substring(0, 50) + "..." : linkText
+          )}</a>
+        </div>
+        <div id="quickai-conversation" class="quickai-conversation">
+          <div class="quickai-message quickai-ai-message">
+            <div class="quickai-message-content">
+              <div class="quickai-loader"></div>
+            </div>
+          </div>
+        </div>
+        <div class="quickai-input-area">
+          <div class="quickai-textarea-wrapper">
+            <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask follow-up questions about this link..." rows="3"></textarea>
+            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8 13V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <div class="quickai-controls">
+            <select id="quickai-model" class="quickai-model-select">
+              ${models
+                .map(
+                  (m) =>
+                    `<option value="${m.id}" ${
+                      m.id === defaultModel ? "selected" : ""
+                    }>${m.name}</option>`
+                )
+                .join("")}
+            </select>
+            <button id="quickai-submit" class="quickai-submit">Submit</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+    activeUI = container;
+
+    // Add event listeners
+    document.getElementById("quickai-close").addEventListener("click", closeUI);
+    document.getElementById("quickai-clear").addEventListener("click", clearConversation);
+    document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
+    document
+      .getElementById("quickai-submit")
+      .addEventListener("click", () => submitQueryForLink(linkUrl, linkText));
+    document
+      .getElementById("quickai-prompt")
+      .addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && e.ctrlKey) {
+          submitQueryForLink(linkUrl, linkText);
+        }
+      });
+
+    // Save model selection
+    document.getElementById("quickai-model").addEventListener("change", (e) => {
+      try {
+        chrome.storage.sync.set({ lastModel: e.target.value });
+      } catch (error) {
+        console.warn("Could not save model selection:", error);
+      }
+    });
+
+    // Add voice button listener
+    document.getElementById("quickai-voice").addEventListener("click", () => {
+      startVoiceRecognition();
+    });
+
+    // Automatically start summarizing the link
+    summarizeLink(linkUrl, linkText, defaultModel);
+
+  } catch (error) {
+    console.error("Error creating link UI:", error);
+    activeUI = null;
+  }
+}
+
+// Scrape content from a link
+async function scrapeLinkContent(linkUrl) {
+  const debug = true; // Enable debug logging
+  
+  try {
+    // Check if it's the same origin
+    const linkOrigin = new URL(linkUrl).origin;
+    const currentOrigin = window.location.origin;
+    
+    if (debug) {
+      console.log('🔍 QuickAI Debug - Starting link scrape:', {
+        linkUrl,
+        linkOrigin,
+        currentOrigin,
+        isSameOrigin: linkOrigin === currentOrigin
+      });
+    }
+    
+    if (linkOrigin === currentOrigin) {
+      // Same origin - we can fetch directly
+      if (debug) console.log('📡 QuickAI Debug - Attempting same-origin fetch...');
+      
+      const response = await fetch(linkUrl);
+      
+      if (debug) {
+        console.log('📡 QuickAI Debug - Fetch response:', {
+          status: response.status,
+          statusText: response.statusText,
+          contentType: response.headers.get('content-type'),
+          ok: response.ok
+        });
+      }
+      
+      if (response.ok) {
+        const html = await response.text();
+        
+        if (debug) {
+          console.log('📄 QuickAI Debug - HTML fetched:', {
+            htmlLength: html.length,
+            htmlPreview: html.substring(0, 500) + '...'
+          });
+        }
+        
+        return extractContentFromPage(html, linkUrl, debug);
+      }
+    } else {
+      // Different origin - try iframe approach
+      if (debug) console.log('🔒 QuickAI Debug - Cross-origin detected, trying iframe approach...');
+      return await scrapeViaIframe(linkUrl, debug);
+    }
+  } catch (error) {
+    console.error("❌ QuickAI Debug - Error scraping link:", error);
+    return null;
+  }
+}
+
+// Extract content from HTML string
+function extractContentFromPage(html, url, debug = false) {
+  try {
+    // Create a temporary container
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    
+    // Extract metadata
+    const titleEl = container.querySelector('title');
+    const title = titleEl?.textContent || '';
+    
+    const metaDesc = container.querySelector('meta[name="description"]');
+    const description = metaDesc?.content || '';
+    
+    if (debug) {
+      console.log('🏷️ QuickAI Debug - Metadata extracted:', {
+        title,
+        description,
+        url
+      });
+    }
+    
+    // Remove unwanted elements
+    const unwantedSelectors = [
+      'script', 'style', 'nav', 'header', 'footer',
+      'aside', '.sidebar', '.advertisement', '.ads',
+      '#comments', '.comments', '.cookie', '.modal'
+    ];
+    
+    let removedCount = 0;
+    unwantedSelectors.forEach(selector => {
+      const elements = container.querySelectorAll(selector);
+      removedCount += elements.length;
+      elements.forEach(el => el.remove());
+    });
+    
+    if (debug) {
+      console.log('🗑️ QuickAI Debug - Removed elements:', {
+        totalRemoved: removedCount,
+        selectors: unwantedSelectors
+      });
+    }
+    
+    // Find main content - add Reddit-specific selectors
+    const contentSelectors = [
+      // Reddit specific
+      '[data-testid="post-container"]',
+      '.Post',
+      '[slot="post-container"]',
+      '.ListingLayout-outerContainer',
+      'shreddit-post',
+      // General selectors
+      'main', 
+      'article', 
+      '[role="main"]',
+      '#main', 
+      '.main', 
+      '#content', 
+      '.content',
+      '.post-content', 
+      '.entry-content', 
+      '.article-body',
+      '.markdown-body',
+      '.article-content'
+    ];
+    
+    let mainContent = null;
+    let selectedSelector = null;
+    for (const selector of contentSelectors) {
+      mainContent = container.querySelector(selector);
+      if (mainContent) {
+        selectedSelector = selector;
+        break;
+      }
+    }
+    
+    if (!mainContent) {
+      mainContent = container.querySelector('body') || container;
+      selectedSelector = 'body (fallback)';
+    }
+    
+    if (debug) {
+      console.log('📍 QuickAI Debug - Content selector:', {
+        selectedSelector,
+        elementFound: !!mainContent,
+        elementType: mainContent?.tagName,
+        elementClasses: mainContent?.className,
+        childrenCount: mainContent?.children.length
+      });
+    }
+    
+    // Extract text more thoroughly
+    let textParts = [];
+    
+    // Get all text nodes
+    const walker = document.createTreeWalker(
+      mainContent,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function(node) {
+          const text = node.textContent.trim();
+          if (text.length === 0) return NodeFilter.FILTER_REJECT;
+          
+          // Skip script and style content
+          const parent = node.parentElement;
+          if (parent && (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    
+    let node;
+    while (node = walker.nextNode()) {
+      textParts.push(node.textContent.trim());
+    }
+    
+    // Join and clean up
+    const textContent = textParts
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 10000); // Increased limit
+    
+    if (debug) {
+      console.log('📝 QuickAI Debug - Content extraction complete:', {
+        textPartsCount: textParts.length,
+        totalLength: textContent.length,
+        truncated: textParts.join(' ').length > 10000,
+        preview: textContent.substring(0, 300) + '...',
+        fullTextParts: textParts.slice(0, 10) // Show first 10 text parts
+      });
+    }
+    
+    const result = {
+      title,
+      description,
+      content: textContent,
+      url,
+      debug: {
+        selector: selectedSelector,
+        partsCount: textParts.length,
+        contentLength: textContent.length
+      }
+    };
+    
+    return result;
+  } catch (error) {
+    console.error("❌ QuickAI Debug - Error extracting content:", error);
+    return null;
+  }
+}
+
+// Scrape content via iframe (for cross-origin)
+async function scrapeViaIframe(linkUrl, debug = false) {
+  if (debug) {
+    console.log('🔐 QuickAI Debug - Cross-origin link detected, requesting background tab scrape:', {
+      url: linkUrl,
+      method: 'background tab via service worker'
+    });
+  }
+  
+  // Request the service worker to scrape in a background tab
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      type: 'scrapeInBackgroundTab',
+      url: linkUrl
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        if (debug) {
+          console.error('❌ QuickAI Debug - Background scrape error:', chrome.runtime.lastError);
+        }
+        resolve({
+          title: '',
+          description: '',
+          content: '',
+          url: linkUrl,
+          crossOrigin: true,
+          error: chrome.runtime.lastError.message
+        });
+        return;
+      }
+      
+      if (response && response.success) {
+        if (debug) {
+          console.log('✅ QuickAI Debug - Background scrape successful:', {
+            title: response.data.title,
+            contentLength: response.data.content?.length || 0,
+            selector: response.data.debug?.selector
+          });
+        }
+        resolve(response.data);
+      } else {
+        if (debug) {
+          console.log('⚠️ QuickAI Debug - Background scrape failed:', response?.error);
+        }
+        resolve({
+          title: '',
+          description: '',
+          content: '',
+          url: linkUrl,
+          crossOrigin: true,
+          error: response?.error || 'Failed to scrape content'
+        });
+      }
+    });
+  });
+}
+
+// Summarize link content
+async function summarizeLink(linkUrl, linkText, model) {
+  const messageId = `ai-message-${Date.now()}`;
+  const conversationArea = document.getElementById("quickai-conversation");
+  
+  // Update the initial message with the ID
+  const aiMessage = conversationArea.querySelector('.quickai-ai-message');
+  if (aiMessage) {
+    aiMessage.id = messageId;
+  }
+  
+  // Update loading message
+  const messageContent = aiMessage?.querySelector(".quickai-message-content");
+  if (messageContent) {
+    messageContent.innerHTML = `
+      <div class="quickai-status-container">
+        <div class="quickai-loader"></div>
+        <div class="quickai-status-text">
+          <div style="font-weight: 600; color: #333;">Scraping link content...</div>
+          <div style="font-size: 11px; color: #666; margin-top: 4px;">Attempting to fetch page content from ${new URL(linkUrl).hostname}</div>
+        </div>
+      </div>`;
+  }
+  
+  // Try to scrape the content
+  const scrapedContent = await scrapeLinkContent(linkUrl);
+  
+  // Show what was scraped
+  if (messageContent) {
+    if (scrapedContent && scrapedContent.content) {
+      const contentPreview = scrapedContent.content.substring(0, 200) + '...';
+      const debugInfo = scrapedContent.debug || {};
+      
+      messageContent.innerHTML = `
+        <div class="quickai-status-container">
+          <div class="quickai-loader"></div>
+          <div class="quickai-status-text">
+            <div style="font-weight: 600; color: #4caf50;">✓ Content scraped successfully!</div>
+            <div style="font-size: 11px; color: #666; margin-top: 4px;">Title: ${scrapedContent.title || 'No title found'}</div>
+            <div style="font-size: 11px; color: #666; margin-top: 2px;">Content length: ${scrapedContent.content.length} characters</div>
+            ${debugInfo.selector ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">Selector used: ${debugInfo.selector}</div>` : ''}
+            ${debugInfo.partsCount ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">Text parts found: ${debugInfo.partsCount}</div>` : ''}
+            
+            <details style="margin-top: 8px;">
+              <summary style="cursor: pointer; font-size: 11px; color: #1976d2;">Show scraped content preview</summary>
+              <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 11px; color: #555; max-height: 150px; overflow-y: auto;">
+                ${escapeHtml(contentPreview)}
+              </div>
+            </details>
+            
+            <details style="margin-top: 8px;">
+              <summary style="cursor: pointer; font-size: 11px; color: #9c27b0;">Show debug information</summary>
+              <div style="margin-top: 8px; padding: 8px; background: #f3e5f5; border-radius: 4px; font-size: 10px; color: #333; font-family: monospace; max-height: 200px; overflow-y: auto;">
+                <div><strong>URL:</strong> ${escapeHtml(linkUrl)}</div>
+                <div><strong>Title:</strong> ${escapeHtml(scrapedContent.title || 'None')}</div>
+                <div><strong>Description:</strong> ${escapeHtml(scrapedContent.description || 'None')}</div>
+                <div><strong>Selector:</strong> ${escapeHtml(debugInfo.selector || 'Unknown')}</div>
+                <div><strong>Text Parts:</strong> ${debugInfo.partsCount || 0}</div>
+                <div><strong>Content Length:</strong> ${debugInfo.contentLength || 0}</div>
+                <div style="margin-top: 8px;"><strong>Full scraped content:</strong></div>
+                <pre style="white-space: pre-wrap; word-break: break-word; margin: 4px 0; padding: 8px; background: #fff; border: 1px solid #e1bee7; border-radius: 4px; max-height: 150px; overflow-y: auto;">
+${escapeHtml(scrapedContent.content)}
+                </pre>
+              </div>
+            </details>
+            
+            <div style="margin-top: 8px; font-weight: 600; color: #333;">Generating AI summary...</div>
+          </div>
+        </div>`;
+    } else {
+      messageContent.innerHTML = `
+        <div class="quickai-status-container">
+          <div class="quickai-loader"></div>
+          <div class="quickai-status-text">
+            <div style="font-weight: 600; color: #ff9800;">⚠️ Could not scrape content</div>
+            <div style="font-size: 11px; color: #666; margin-top: 4px;">Reason: ${scrapedContent?.error || 'Cross-origin restrictions'}</div>
+            <div style="margin-top: 8px; font-weight: 600; color: #333;">Using AI knowledge about this link...</div>
+          </div>
+        </div>`;
+    }
+  }
+  
+  try {
+    chrome.runtime.sendMessage({
+      type: "summarizeLinkWithContent",
+      linkUrl: linkUrl,
+      linkText: linkText,
+      scrapedContent: scrapedContent,
+      model: model,
+      messageId: messageId
+    });
+  } catch (error) {
+    console.error("Failed to send message to service worker:", error);
+    if (messageContent) {
+      messageContent.innerHTML = '<div class="quickai-error">Failed to process link. Please refresh the page and try again.</div>';
+    }
+  }
+}
+
+// Submit query for link
+async function submitQueryForLink(linkUrl, linkText) {
+  const prompt = document.getElementById("quickai-prompt").value.trim();
+  if (!prompt) return;
+  
+  const model = document.getElementById("quickai-model").value;
+  const conversationArea = document.getElementById("quickai-conversation");
+  const submitBtn = document.getElementById("quickai-submit");
+  const promptInput = document.getElementById("quickai-prompt");
+  
+  // Add user message to conversation
+  const userMessage = document.createElement("div");
+  userMessage.className = "quickai-message quickai-user-message";
+  userMessage.innerHTML = `<div class="quickai-message-content">${escapeHtml(prompt)}</div>`;
+  conversationArea.appendChild(userMessage);
+  
+  // Clear input
+  promptInput.value = "";
+  
+  // Add AI message container with loading state
+  const aiMessage = document.createElement("div");
+  aiMessage.className = "quickai-message quickai-ai-message";
+  aiMessage.id = `ai-message-${Date.now()}`;
+  aiMessage.innerHTML = '<div class="quickai-message-content"><div class="quickai-loader"></div></div>';
+  conversationArea.appendChild(aiMessage);
+  
+  // Scroll to bottom
+  conversationArea.scrollTop = conversationArea.scrollHeight;
+  
+  // Store message ID for streaming updates
+  const currentMessageId = aiMessage.id;
+  
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Processing...";
+  
+  try {
+    chrome.runtime.sendMessage({
+      type: "queryAI",
+      context: `Link: ${linkUrl}\nLink Text: ${linkText}`,
+      prompt: prompt,
+      model: model,
+      messageId: currentMessageId,
+      isLinkQuery: true
+    });
+  } catch (error) {
+    console.error("Failed to send message to service worker:", error);
+    const messageContent = aiMessage.querySelector(".quickai-message-content");
+    if (messageContent) {
+      messageContent.innerHTML = '<div class="quickai-error">Failed to connect to QuickAI service. Please refresh the page and try again.</div>';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit";
+    }
   }
 }
 
@@ -1105,10 +1663,16 @@ async function getModels() {
     const match = text.match(/const\s+models\s*=\s*(\[[\s\S]*?\]);/);
 
     if (match && match[1]) {
-      // Use Function constructor as a safer alternative to eval
-      const modelsArray = new Function("return " + match[1])();
-      console.log("Loaded", modelsArray.length, "models from models.js");
-      return modelsArray;
+      try {
+        // Parse JSON safely without eval
+        const jsonString = match[1].replace(/'/g, '"').replace(/(\w+):/g, '"$1":');
+        const modelsArray = JSON.parse(jsonString);
+        console.log("Loaded", modelsArray.length, "models from models.js");
+        return modelsArray;
+      } catch (e) {
+        console.error("Failed to parse models:", e);
+        throw new Error("Could not parse models from models.js");
+      }
     }
 
     throw new Error("Could not parse models from models.js");
@@ -1144,6 +1708,61 @@ document.addEventListener("click", (e) => {
     if (selection.toString().trim() === "") {
       closeUI();
     }
+  }
+});
+
+// Add link hover detection
+document.addEventListener("mouseover", (e) => {
+  const link = e.target.closest('a');
+  
+  // Only process if it's a link with href and not the currently hovered one
+  if (link && link.href && link !== hoveredLink && !activeUI) {
+    // Clear any existing timeout
+    if (linkHoverTimeout) {
+      clearTimeout(linkHoverTimeout);
+    }
+    
+    // Set new hovered link
+    hoveredLink = link;
+    currentLinkUrl = link.href;
+    
+    // Show button after delay to avoid flickering
+    linkHoverTimeout = setTimeout(() => {
+      if (hoveredLink === link && !floatingButton && !window.getSelection().toString().trim()) {
+        const rect = link.getBoundingClientRect();
+        showFloatingButton('link', rect, {
+          url: link.href,
+          text: link.textContent || link.href
+        });
+      }
+    }, 300);
+  }
+});
+
+// Handle mouse leave from links
+document.addEventListener("mouseout", (e) => {
+  const link = e.target.closest('a');
+  
+  if (link === hoveredLink) {
+    // Clear timeout
+    if (linkHoverTimeout) {
+      clearTimeout(linkHoverTimeout);
+      linkHoverTimeout = null;
+    }
+    
+    // Hide button if it's a link button
+    if (floatingButton && floatingButton.dataset.type === 'link') {
+      // Add small delay to allow clicking the button
+      setTimeout(() => {
+        if (floatingButton && floatingButton.dataset.type === 'link' && 
+            !floatingButton.matches(':hover')) {
+          hideFloatingButton();
+        }
+      }, 100);
+    }
+    
+    hoveredLink = null;
+    currentLinkUrl = null;
   }
 });
 

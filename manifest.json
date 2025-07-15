@@ -8,10 +8,13 @@
     "sidePanel",
     "activeTab",
     "contextMenus",
-    "clipboardRead"
+    "clipboardRead",
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
-    "https://openrouter.ai/api/v1/*"
+    "https://openrouter.ai/api/v1/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "service-worker.js"

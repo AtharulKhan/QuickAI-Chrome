@@ -675,3 +675,57 @@
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
 }
+
+/* Link hover button styles */
+#quickai-trigger-button.quickai-link-button {
+    background: linear-gradient(135deg, #2196F3, #00BCD4);
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
+}
+
+#quickai-trigger-button.quickai-link-button:hover {
+    box-shadow: 0 6px 16px rgba(33, 150, 243, 0.5);
+}
+
+/* Link context styling */
+.quickai-link-context {
+    background: #e3f2fd;
+    border-bottom-color: #90caf9;
+}
+
+.quickai-context-link {
+    color: #1976d2;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.quickai-context-link:hover {
+    text-decoration: underline;
+}
+
+/* Status container for scraping feedback */
+.quickai-status-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px;
+}
+
+.quickai-status-text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.quickai-status-text details {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+.quickai-status-text summary {
+    outline: none;
+    user-select: none;
+}
+
+.quickai-status-text summary:hover {
+    text-decoration: underline;
+}

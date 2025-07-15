@@ -3,6 +3,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'queryAI') {
         handleAIQuery(message, sender.tab.id);
         return true;
+    } else if (message.type === 'fetchAndSummarizeLink') {
+        handleLinkSummarization(message, sender.tab.id);
+        return true;
+    } else if (message.type === 'summarizeLinkWithContent') {
+        handleLinkSummarizationWithContent(message, sender.tab.id);
+        return true;
+    } else if (message.type === 'scrapeInBackgroundTab') {
+        handleBackgroundTabScrape(message, sendResponse);
+        return true; // Will respond asynchronously
     }
 });
 
@@ -208,6 +217,536 @@ chrome.runtime.onInstalled.addListener(() => {
         contexts: ["selection"]
     });
 });
+
+// Handle link summarization
+async function handleLinkSummarization(message, tabId) {
+    try {
+        const { linkUrl, linkText, model, messageId } = message;
+        
+        // Get API key from storage
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            chrome.tabs.sendMessage(tabId, {
+                type: 'streamError',
+                error: 'API key not configured. Please set your OpenRouter API key in the extension options.',
+                messageId
+            });
+            return;
+        }
+
+        // Notify start of streaming
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId 
+        });
+
+        // Try to fetch link content
+        let linkContent = null;
+        let fetchError = null;
+        
+        try {
+            // Attempt to fetch the page content
+            const response = await fetch(linkUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            });
+            
+            if (response.ok) {
+                const html = await response.text();
+                linkContent = extractContentFromHtml(html, linkUrl);
+            } else {
+                fetchError = `Failed to fetch (${response.status})`;
+            }
+        } catch (error) {
+            fetchError = `Network error: ${error.message}`;
+            console.error('Failed to fetch link:', error);
+        }
+
+        // Build prompt for summarization
+        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. `;
+        
+        if (linkContent) {
+            systemMessage += `Here is the content from the link "${linkUrl}":
+
+Title: ${linkContent.title || 'N/A'}
+Description: ${linkContent.description || 'N/A'}
+
+Content:
+${linkContent.content}
+
+Please provide a concise summary of this webpage, highlighting the main points and key information.`;
+        } else {
+            systemMessage += `The user wants to know about this link: "${linkUrl}" (${linkText})
+            
+Unfortunately, I couldn't fetch the actual content due to: ${fetchError}. 
+Please provide any relevant information you might have about this URL or topic based on the link text and URL pattern.`;
+        }
+
+        // Make API request
+        const apiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/QuickAI',
+                'X-Title': 'QuickAI Chrome Extension'
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: systemMessage
+                    },
+                    {
+                        role: 'user',
+                        content: 'Please summarize this webpage content concisely.'
+                    }
+                ],
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 1000
+            })
+        });
+
+        if (!apiResponse.ok) {
+            const error = await apiResponse.text();
+            throw new Error(`API Error: ${apiResponse.status} - ${error}`);
+        }
+
+        // Process streaming response
+        const reader = apiResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') {
+                        break;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content || '';
+                        
+                        if (content) {
+                            fullResponse += content;
+                            const formattedContent = formatMarkdown(content);
+                            chrome.tabs.sendMessage(tabId, {
+                                type: 'streamChunk',
+                                content: formattedContent,
+                                rawContent: content,
+                                messageId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing stream data:', e);
+                    }
+                }
+            }
+        }
+
+        // Notify completion
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId 
+        });
+
+    } catch (error) {
+        console.error('QuickAI Link Error:', error);
+        chrome.tabs.sendMessage(tabId, {
+            type: 'streamError',
+            error: error.message,
+            messageId: message.messageId
+        });
+    }
+}
+
+// Extract content from HTML
+function extractContentFromHtml(html, url) {
+    try {
+        // Create a DOM parser
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        // Extract metadata
+        const title = doc.querySelector('title')?.textContent || 
+                     doc.querySelector('meta[property="og:title"]')?.content || '';
+        
+        const description = doc.querySelector('meta[name="description"]')?.content || 
+                           doc.querySelector('meta[property="og:description"]')?.content || '';
+        
+        // Remove unwanted elements
+        const elementsToRemove = [
+            'script', 'style', 'nav', 'header', 'footer', 
+            'aside', '.sidebar', '.advertisement', '.ads',
+            '#comments', '.comments', '.cookie-notice'
+        ];
+        
+        elementsToRemove.forEach(selector => {
+            doc.querySelectorAll(selector).forEach(el => el.remove());
+        });
+        
+        // Try to find main content
+        const contentSelectors = [
+            'main', 'article', '[role="main"]', 
+            '#main', '.main', '#content', '.content',
+            '.article-body', '.post-content', '.entry-content'
+        ];
+        
+        let mainContent = null;
+        for (const selector of contentSelectors) {
+            mainContent = doc.querySelector(selector);
+            if (mainContent) break;
+        }
+        
+        // Fallback to body if no main content found
+        if (!mainContent) {
+            mainContent = doc.body;
+        }
+        
+        // Extract text content
+        let textContent = '';
+        const walker = document.createTreeWalker(
+            mainContent,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: function(node) {
+                    if (node.textContent.trim().length === 0) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            }
+        );
+        
+        const textParts = [];
+        let node;
+        while (node = walker.nextNode()) {
+            const text = node.textContent.trim();
+            if (text) {
+                textParts.push(text);
+            }
+        }
+        
+        textContent = textParts.join(' ');
+        
+        // Limit content length
+        const maxLength = 5000;
+        if (textContent.length > maxLength) {
+            textContent = textContent.substring(0, maxLength) + '... [content truncated]';
+        }
+        
+        return {
+            title,
+            description,
+            content: textContent,
+            url
+        };
+        
+    } catch (error) {
+        console.error('Error extracting content from HTML:', error);
+        return null;
+    }
+}
+
+// Handle link summarization with scraped content
+async function handleLinkSummarizationWithContent(message, tabId) {
+    try {
+        const { linkUrl, linkText, scrapedContent, model, messageId } = message;
+        
+        // Get API key from storage
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            chrome.tabs.sendMessage(tabId, {
+                type: 'streamError',
+                error: 'API key not configured. Please set your OpenRouter API key in the extension options.',
+                messageId
+            });
+            return;
+        }
+
+        // Notify start of streaming
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId 
+        });
+
+        // Build prompt based on whether we have content
+        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. `;
+        
+        if (scrapedContent && scrapedContent.content) {
+            // We have scraped content
+            systemMessage += `Here is the content from the link "${linkUrl}":
+
+Title: ${scrapedContent.title || 'N/A'}
+Description: ${scrapedContent.description || 'N/A'}
+
+Content:
+${scrapedContent.content}
+
+Please provide a concise summary of this webpage, highlighting the main points and key information. Focus on:
+1. The main topic or purpose
+2. Key points or findings
+3. Important details or recommendations
+4. Any actionable items`;
+        } else {
+            // No content available - use AI knowledge
+            systemMessage += `The user wants to know about this link: "${linkUrl}" (${linkText})
+
+Based on the URL and link text, please provide:
+1. What this page is likely about
+2. What kind of content/information it might contain
+3. Any relevant context about the website or topic
+4. General information that might be helpful
+
+Note: I couldn't access the actual page content due to technical limitations.`;
+        }
+
+        // Make API request
+        const apiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/QuickAI',
+                'X-Title': 'QuickAI Chrome Extension'
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: systemMessage
+                    },
+                    {
+                        role: 'user',
+                        content: 'Please provide a clear and concise summary.'
+                    }
+                ],
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 1000
+            })
+        });
+
+        if (!apiResponse.ok) {
+            const error = await apiResponse.text();
+            throw new Error(`API Error: ${apiResponse.status} - ${error}`);
+        }
+
+        // Process streaming response
+        const reader = apiResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') {
+                        break;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content || '';
+                        
+                        if (content) {
+                            fullResponse += content;
+                            const formattedContent = formatMarkdown(content);
+                            chrome.tabs.sendMessage(tabId, {
+                                type: 'streamChunk',
+                                content: formattedContent,
+                                rawContent: content,
+                                messageId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing stream data:', e);
+                    }
+                }
+            }
+        }
+
+        // Notify completion
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId 
+        });
+
+    } catch (error) {
+        console.error('QuickAI Link Error:', error);
+        chrome.tabs.sendMessage(tabId, {
+            type: 'streamError',
+            error: error.message,
+            messageId: message.messageId
+        });
+    }
+}
+
+// Handle background tab scraping for cross-origin links
+async function handleBackgroundTabScrape(message, sendResponse) {
+    const { url } = message;
+    
+    try {
+        console.log('📋 Service Worker - Opening background tab for:', url);
+        
+        // Create a new tab in the background
+        const tab = await chrome.tabs.create({
+            url: url,
+            active: false
+        });
+        
+        // Wait for the tab to load
+        await new Promise((resolve) => {
+            const listener = (tabId, changeInfo) => {
+                if (tabId === tab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            
+            // Timeout after 10 seconds
+            setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+            }, 10000);
+        });
+        
+        // Inject script to extract content
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: extractPageContent,
+            args: [url]
+        });
+        
+        // Close the tab
+        await chrome.tabs.remove(tab.id);
+        
+        if (results && results[0] && results[0].result) {
+            console.log('✅ Service Worker - Content extracted successfully');
+            sendResponse({ success: true, data: results[0].result });
+        } else {
+            console.error('❌ Service Worker - Failed to extract content');
+            sendResponse({ success: false, error: 'Failed to extract content from page' });
+        }
+        
+    } catch (error) {
+        console.error('❌ Service Worker - Error in background tab scrape:', error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+// Function to inject and extract content from the page
+function extractPageContent(url) {
+    try {
+        // Extract metadata
+        const title = document.title || '';
+        const metaDesc = document.querySelector('meta[name="description"]');
+        const description = metaDesc?.content || '';
+        
+        // Remove unwanted elements
+        const clonedDoc = document.cloneNode(true);
+        const unwantedSelectors = [
+            'script', 'style', 'nav', 'header', 'footer',
+            'aside', '.sidebar', '.advertisement', '.ads',
+            '#comments', '.comments', '.cookie', '.modal'
+        ];
+        
+        unwantedSelectors.forEach(selector => {
+            clonedDoc.querySelectorAll(selector).forEach(el => el.remove());
+        });
+        
+        // Find main content
+        const contentSelectors = [
+            // Reddit specific
+            '[data-testid="post-container"]',
+            '.Post',
+            '[slot="post-container"]',
+            '.ListingLayout-outerContainer',
+            'shreddit-post',
+            // General selectors
+            'main', 
+            'article', 
+            '[role="main"]',
+            '#main', 
+            '.main', 
+            '#content', 
+            '.content',
+            '.post-content', 
+            '.entry-content', 
+            '.article-body',
+            '.markdown-body',
+            '.article-content'
+        ];
+        
+        let mainContent = null;
+        let selectedSelector = null;
+        for (const selector of contentSelectors) {
+            mainContent = clonedDoc.querySelector(selector);
+            if (mainContent) {
+                selectedSelector = selector;
+                break;
+            }
+        }
+        
+        if (!mainContent) {
+            mainContent = clonedDoc.body || clonedDoc;
+            selectedSelector = 'body (fallback)';
+        }
+        
+        // Extract text
+        const textContent = mainContent.textContent
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 10000);
+        
+        return {
+            title,
+            description,
+            content: textContent,
+            url,
+            debug: {
+                selector: selectedSelector,
+                contentLength: textContent.length
+            }
+        };
+    } catch (error) {
+        return {
+            title: '',
+            description: '',
+            content: '',
+            url,
+            error: error.message
+        };
+    }
+}
 
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
