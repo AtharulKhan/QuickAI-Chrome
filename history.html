@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>QuickAI History</title>
+    <link rel="stylesheet" href="history.css">
+</head>
+<body>
+    <div class="history-header">
+        <h1>Conversation History</h1>
+        <button id="refresh-history" class="icon-button" title="Refresh">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+        </button>
+    </div>
+    
+    <div id="history-container" class="history-container">
+        <div class="loading">
+            <div class="loader"></div>
+            <p>Loading history...</p>
+        </div>
+    </div>
+    
+    <div id="empty-state" class="empty-state" style="display: none;">
+        <div class="empty-icon">📝</div>
+        <h2>No conversations yet</h2>
+        <p>Hold <kbd>Alt</kbd> and select text on any webpage to start a conversation with AI</p>
+    </div>
+    
+    <script src="history.js"></script>
+</body>
+</html>

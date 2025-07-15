@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>QuickAI Settings</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>QuickAI Settings</h1>
+            <p>Configure your AI assistant settings</p>
+        </div>
+
+        <div class="section">
+            <h2>API Configuration</h2>
+            <div class="form-group">
+                <label for="api-key">OpenRouter API Key</label>
+                <div class="input-wrapper">
+                    <input type="password" id="api-key" placeholder="sk-or-v1-..." autocomplete="off">
+                    <button id="toggle-visibility" class="icon-button" title="Toggle visibility">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+                <p class="hint">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a></p>
+            </div>
+            <button id="save-settings" class="primary-button">Save Settings</button>
+            <div id="status-message" class="status-message"></div>
+        </div>
+
+        <div class="section">
+            <h2>History Management</h2>
+            <p>Your conversation history is stored locally and synced across your devices.</p>
+            <div class="stats" id="history-stats">
+                <span>Loading history stats...</span>
+            </div>
+            <button id="clear-history" class="danger-button">Clear All History</button>
+        </div>
+
+        <div class="section">
+            <h2>Usage Guide</h2>
+            <div class="guide">
+                <div class="guide-item">
+                    <div class="guide-icon">⌨️</div>
+                    <div>
+                        <h3>Quick Access</h3>
+                        <p>Hold <kbd>Alt</kbd> and select any text on a webpage to activate QuickAI</p>
+                    </div>
+                </div>
+                <div class="guide-item">
+                    <div class="guide-icon">💬</div>
+                    <div>
+                        <h3>Ask Questions</h3>
+                        <p>Type your question about the selected text and get instant AI responses</p>
+                    </div>
+                </div>
+                <div class="guide-item">
+                    <div class="guide-icon">📚</div>
+                    <div>
+                        <h3>View History</h3>
+                        <p>Access your conversation history from the Chrome side panel</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>QuickAI v1.0.0 | <a href="https://github.com/QuickAI" target="_blank">GitHub</a></p>
+        </div>
+    </div>
+    <script src="options.js"></script>
+</body>
+</html>

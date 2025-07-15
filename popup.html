@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>QuickAI</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <div class="popup-header">
+            <h1>QuickAI</h1>
+            <p>AI assistance at your fingertips</p>
+        </div>
+        
+        <div class="quick-guide">
+            <div class="guide-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <p>Hold <kbd>Alt</kbd> key</p>
+                </div>
+            </div>
+            <div class="guide-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <p>Select any text</p>
+                </div>
+            </div>
+            <div class="guide-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <p>Ask your question</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="popup-actions">
+            <button id="open-settings" class="action-button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3m16.66-5.66l-4.24 4.24M7.58 7.58L3.34 3.34m0 17.32l4.24-4.24m9.84 0l4.24 4.24"></path>
+                </svg>
+                Settings
+            </button>
+            <button id="open-history" class="action-button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                History
+            </button>
+        </div>
+        
+        <div class="popup-footer">
+            <a href="https://github.com/QuickAI" target="_blank">GitHub</a>
+            <span>•</span>
+            <a href="https://openrouter.ai" target="_blank">OpenRouter</a>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

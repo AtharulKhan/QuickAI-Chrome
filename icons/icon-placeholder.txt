@@ -1,0 +1,16 @@
+The PNG icon files need to be created from the icon.svg file.
+
+To generate the required PNG files:
+
+1. Use an online SVG to PNG converter (like cloudconvert.com or convertio.co)
+2. Upload the icon.svg file
+3. Generate PNG files at these sizes:
+   - icon16.png (16x16 pixels)
+   - icon48.png (48x48 pixels)
+   - icon128.png (128x128 pixels)
+
+Alternatively, you can use command-line tools:
+- ImageMagick: convert icon.svg -resize 16x16 icon16.png
+- Inkscape: inkscape icon.svg --export-png=icon16.png --export-width=16
+
+The icons should maintain the gradient background and white chat bubble design.
