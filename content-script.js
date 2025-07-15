@@ -361,7 +361,16 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                     </div>
                 </div>
                 <div class="quickai-input-area">
-                    <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask a question about the selected text..." rows="3"></textarea>
+                    <div class="quickai-textarea-wrapper">
+                        <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask a question about the selected text..." rows="3"></textarea>
+                        <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M8 13V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
                     <div class="quickai-controls">
                         <select id="quickai-model" class="quickai-model-select">
                             ${models
@@ -412,6 +421,11 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
         const action = e.target.dataset.action;
         executeQuickAction(action, contextText);
       });
+    });
+
+    // Add voice button listener
+    document.getElementById("quickai-voice").addEventListener("click", () => {
+      startVoiceRecognition();
     });
 
     // Focus on textarea
@@ -988,3 +1002,117 @@ document.addEventListener("keydown", async (e) => {
     }, 100);
   }
 });
+
+// Speech recognition variables
+let recognition = null;
+let isRecording = false;
+
+// Initialize speech recognition
+function initSpeechRecognition() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    console.warn('Speech recognition not supported');
+    return null;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognition();
+  
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  
+  return recognition;
+}
+
+// Start voice recognition
+function startVoiceRecognition() {
+  const voiceBtn = document.getElementById("quickai-voice");
+  const promptTextarea = document.getElementById("quickai-prompt");
+  
+  if (!voiceBtn || !promptTextarea) return;
+  
+  if (isRecording) {
+    // Stop recording
+    if (recognition) {
+      recognition.stop();
+    }
+    return;
+  }
+  
+  // Initialize recognition if not already done
+  if (!recognition) {
+    recognition = initSpeechRecognition();
+    if (!recognition) {
+      alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.');
+      return;
+    }
+    
+    // Set up event handlers
+    recognition.onstart = () => {
+      isRecording = true;
+      voiceBtn.classList.add('recording');
+      voiceBtn.title = 'Stop recording';
+    };
+    
+    recognition.onend = () => {
+      isRecording = false;
+      voiceBtn.classList.remove('recording');
+      voiceBtn.title = 'Voice to text';
+    };
+    
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Update textarea with the transcribed text
+      if (finalTranscript || interimTranscript) {
+        const currentValue = promptTextarea.value;
+        const cursorPosition = promptTextarea.selectionStart;
+        
+        // If there's final transcript, append it
+        if (finalTranscript) {
+          const beforeCursor = currentValue.substring(0, cursorPosition);
+          const afterCursor = currentValue.substring(cursorPosition);
+          
+          // Add space if needed
+          const needsSpace = beforeCursor.length > 0 && !beforeCursor.endsWith(' ');
+          const newValue = beforeCursor + (needsSpace ? ' ' : '') + finalTranscript + afterCursor;
+          
+          promptTextarea.value = newValue;
+          
+          // Move cursor to end of inserted text
+          const newPosition = beforeCursor.length + (needsSpace ? 1 : 0) + finalTranscript.length;
+          promptTextarea.setSelectionRange(newPosition, newPosition);
+        }
+      }
+    };
+    
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      isRecording = false;
+      voiceBtn.classList.remove('recording');
+      voiceBtn.title = 'Voice to text';
+      
+      if (event.error === 'not-allowed') {
+        alert('Microphone access was denied. Please allow microphone access and try again.');
+      }
+    };
+  }
+  
+  // Start recognition
+  try {
+    recognition.start();
+  } catch (error) {
+    console.error('Failed to start speech recognition:', error);
+    alert('Failed to start voice recognition. Please try again.');
+  }
+}
