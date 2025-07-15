@@ -100,6 +100,111 @@ function getNextBlockElement(element) {
   return next;
 }
 
+// Extract full page content for AI context
+function extractFullPageContent() {
+  try {
+    // Get page metadata
+    const pageTitle = document.title || "";
+    const pageUrl = window.location.href;
+    
+    // Try to find the main content area
+    const mainContentSelectors = [
+      'main', 
+      'article', 
+      '[role="main"]', 
+      '#main', 
+      '.main',
+      '#content',
+      '.content',
+      '#article',
+      '.article',
+      '.post',
+      '.entry-content',
+      '.page-content'
+    ];
+    
+    let mainContent = null;
+    for (const selector of mainContentSelectors) {
+      mainContent = document.querySelector(selector);
+      if (mainContent) break;
+    }
+    
+    // If no main content found, use body
+    if (!mainContent) {
+      mainContent = document.body;
+    }
+    
+    // Clone the content to avoid modifying the original
+    const contentClone = mainContent.cloneNode(true);
+    
+    // Remove unwanted elements
+    const unwantedSelectors = [
+      'script',
+      'style',
+      'noscript',
+      'iframe',
+      'object',
+      'embed',
+      'nav',
+      'header',
+      'footer',
+      '.sidebar',
+      '.advertisement',
+      '.ads',
+      '#quickai-container',
+      '#quickai-trigger-button'
+    ];
+    
+    unwantedSelectors.forEach(selector => {
+      contentClone.querySelectorAll(selector).forEach(el => el.remove());
+    });
+    
+    // Extract text content
+    let textContent = "";
+    const walker = document.createTreeWalker(
+      contentClone,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function(node) {
+          // Skip whitespace-only nodes
+          if (node.textContent.trim().length === 0) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    
+    let node;
+    const textParts = [];
+    while (node = walker.nextNode()) {
+      const text = node.textContent.trim();
+      if (text) {
+        textParts.push(text);
+      }
+    }
+    
+    textContent = textParts.join(' ');
+    
+    // Limit content length to avoid token limits (approximately 10,000 characters)
+    const maxLength = 10000;
+    if (textContent.length > maxLength) {
+      textContent = textContent.substring(0, maxLength) + "... [content truncated]";
+    }
+    
+    return {
+      title: pageTitle,
+      url: pageUrl,
+      content: textContent,
+      truncated: textContent.length > maxLength
+    };
+    
+  } catch (error) {
+    console.error("Error extracting page content:", error);
+    return null;
+  }
+}
+
 // Check if element is editable
 function isEditableElement(element) {
   if (!element) return false;
@@ -349,6 +454,14 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                       contextText.substring(0, 100)
                     )}${contextText.length > 100 ? "..." : ""}</span>
                 </div>
+                <div class="quickai-page-context-toggle">
+                    <label class="quickai-toggle-label">
+                        <input type="checkbox" id="quickai-include-page-context" class="quickai-toggle-checkbox">
+                        <span class="quickai-toggle-slider"></span>
+                        <span class="quickai-toggle-text">Include Full Page Context</span>
+                    </label>
+                    <span id="quickai-page-context-indicator" class="quickai-page-context-indicator"></span>
+                </div>
                 <div id="quickai-conversation" class="quickai-conversation"></div>
                 <div class="quickai-quick-actions">
                     <div class="quickai-actions-label">Quick Actions:</div>
@@ -427,6 +540,57 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
     document.getElementById("quickai-voice").addEventListener("click", () => {
       startVoiceRecognition();
     });
+
+    // Add page context toggle listener
+    const pageContextToggle = document.getElementById("quickai-include-page-context");
+    const pageContextIndicator = document.getElementById("quickai-page-context-indicator");
+    
+    // Load saved state
+    try {
+      chrome.storage.sync.get("includePageContext", (result) => {
+        if (result.includePageContext) {
+          pageContextToggle.checked = true;
+          updatePageContextIndicator(true);
+        }
+      });
+    } catch (error) {
+      console.warn("Could not load page context preference:", error);
+    }
+    
+    pageContextToggle.addEventListener("change", async (e) => {
+      const includePageContext = e.target.checked;
+      
+      // Save preference
+      try {
+        chrome.storage.sync.set({ includePageContext });
+      } catch (error) {
+        console.warn("Could not save page context preference:", error);
+      }
+      
+      // Update indicator
+      updatePageContextIndicator(includePageContext);
+      
+      // If enabled, extract and cache page content
+      if (includePageContext) {
+        pageContextIndicator.textContent = "Extracting page content...";
+        const pageContent = extractFullPageContent();
+        if (pageContent) {
+          container.dataset.pageContent = JSON.stringify(pageContent);
+          pageContextIndicator.textContent = pageContent.truncated ? "Page content loaded (truncated)" : "Page content loaded";
+        } else {
+          pageContextIndicator.textContent = "Failed to extract page content";
+        }
+      }
+    });
+    
+    function updatePageContextIndicator(enabled) {
+      if (enabled) {
+        pageContextIndicator.textContent = "Page context will be included";
+        pageContextIndicator.style.color = "#4caf50";
+      } else {
+        pageContextIndicator.textContent = "";
+      }
+    }
 
     // Focus on textarea
     document.getElementById("quickai-prompt").focus();
@@ -512,6 +676,26 @@ async function submitQueryWithPrompt(contextText, prompt) {
     storedContext = null;
   }
   
+  // Check if page context is enabled and get it
+  let pageContent = null;
+  const includePageContext = document.getElementById("quickai-include-page-context")?.checked;
+  if (includePageContext) {
+    try {
+      const container = document.getElementById("quickai-container");
+      if (container?.dataset.pageContent) {
+        pageContent = JSON.parse(container.dataset.pageContent);
+      } else {
+        // Extract page content if not cached
+        pageContent = extractFullPageContent();
+        if (pageContent) {
+          container.dataset.pageContent = JSON.stringify(pageContent);
+        }
+      }
+    } catch (e) {
+      console.error("Error getting page content:", e);
+    }
+  }
+  
   // Send to service worker with full context
   const contextToSend = storedContext || fullContext || { selected: contextText, before: "", after: "", full: contextText };
   
@@ -520,6 +704,8 @@ async function submitQueryWithPrompt(contextText, prompt) {
       type: "queryAI",
       context: contextText,
       fullContext: contextToSend,
+      pageContent: pageContent,
+      includePageContext: includePageContext,
       prompt: prompt,
       model: model,
       messageId: currentMessageId, // Pass message ID for targeted updates

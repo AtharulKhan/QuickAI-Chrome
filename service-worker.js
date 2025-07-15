@@ -27,15 +27,34 @@ async function handleAIQuery(message, tabId) {
         });
 
         // Build system message with context
-        const systemMessage = message.fullContext ? 
-            `You are a helpful AI assistant. The user has selected the following text from a webpage: "${message.context}". 
-
-Here is additional context from the surrounding paragraphs:
-${message.fullContext.before ? `Before the selection:\n${message.fullContext.before}\n` : ''}
-${message.fullContext.after ? `After the selection:\n${message.fullContext.after}` : ''}
-
-Please provide helpful, relevant, and concise responses based on this context. Focus primarily on the selected text, but use the surrounding context to better understand the topic.` :
-            `You are a helpful AI assistant. The user has selected the following text from a webpage as context: "${message.context}". Please provide helpful, relevant, and concise responses based on this context.`;
+        let systemMessage = `You are a helpful AI assistant. The user has selected the following text from a webpage: "${message.context}".`;
+        
+        // Add surrounding context if available
+        if (message.fullContext) {
+            systemMessage += `\n\nHere is additional context from the surrounding paragraphs:`;
+            if (message.fullContext.before) {
+                systemMessage += `\nBefore the selection:\n${message.fullContext.before}`;
+            }
+            if (message.fullContext.after) {
+                systemMessage += `\nAfter the selection:\n${message.fullContext.after}`;
+            }
+        }
+        
+        // Add full page context if enabled
+        if (message.includePageContext && message.pageContent) {
+            systemMessage += `\n\nFull Page Context:`;
+            systemMessage += `\nPage Title: ${message.pageContent.title}`;
+            systemMessage += `\nPage URL: ${message.pageContent.url}`;
+            systemMessage += `\nPage Content:\n${message.pageContent.content}`;
+            
+            if (message.pageContent.truncated) {
+                systemMessage += `\n\n[Note: Page content was truncated due to length]`;
+            }
+            
+            systemMessage += `\n\nPlease use the full page context to provide more comprehensive and accurate answers. Consider the selected text within the broader context of the entire page.`;
+        } else {
+            systemMessage += `\n\nPlease provide helpful, relevant, and concise responses based on this context. Focus primarily on the selected text${message.fullContext ? ', but use the surrounding context to better understand the topic' : ''}.`;
+        }
         
 
         // Make API request
