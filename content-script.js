@@ -339,6 +339,7 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                 <div class="quickai-header">
                     <span class="quickai-title">QuickAI</span>
                     <div class="quickai-header-buttons">
+                        <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
                         <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
                         <button id="quickai-close" class="quickai-close">&times;</button>
                     </div>
@@ -384,6 +385,7 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
     // Add event listeners
     document.getElementById("quickai-close").addEventListener("click", closeUI);
     document.getElementById("quickai-clear").addEventListener("click", clearConversation);
+    document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
     document
       .getElementById("quickai-submit")
       .addEventListener("click", () => submitQuery(contextText));
@@ -864,6 +866,22 @@ function clearConversation() {
     // Focus back on input
     const promptInput = document.getElementById("quickai-prompt");
     if (promptInput) promptInput.focus();
+  }
+}
+
+// Toggle expand/collapse
+function toggleExpand() {
+  const container = document.getElementById("quickai-container");
+  const expandBtn = document.getElementById("quickai-expand");
+  
+  if (container.classList.contains("quickai-expanded")) {
+    container.classList.remove("quickai-expanded");
+    expandBtn.innerHTML = "⬜";
+    expandBtn.title = "Expand";
+  } else {
+    container.classList.add("quickai-expanded");
+    expandBtn.innerHTML = "⬛";
+    expandBtn.title = "Collapse";
   }
 }
 
