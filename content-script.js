@@ -187,7 +187,10 @@ async function createFloatingUI(rect, contextText, contextData = null) {
             <div class="quickai-content">
                 <div class="quickai-header">
                     <span class="quickai-title">QuickAI</span>
-                    <button id="quickai-close" class="quickai-close">&times;</button>
+                    <div class="quickai-header-buttons">
+                        <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
+                        <button id="quickai-close" class="quickai-close">&times;</button>
+                    </div>
                 </div>
                 <div class="quickai-context">
                     <strong>Context:</strong> <span class="quickai-context-text">${escapeHtml(
@@ -195,6 +198,16 @@ async function createFloatingUI(rect, contextText, contextData = null) {
                     )}${contextText.length > 100 ? "..." : ""}</span>
                 </div>
                 <div id="quickai-conversation" class="quickai-conversation"></div>
+                <div class="quickai-quick-actions">
+                    <div class="quickai-actions-label">Quick Actions:</div>
+                    <div class="quickai-actions-buttons">
+                        <button class="quickai-action-btn" data-action="summarize">📝 Summarize</button>
+                        <button class="quickai-action-btn" data-action="explain">💡 Explain</button>
+                        <button class="quickai-action-btn" data-action="grammar">✏️ Fix Grammar</button>
+                        <button class="quickai-action-btn" data-action="improve">✨ Improve</button>
+                        <button class="quickai-action-btn" data-action="translate">🌐 Translate</button>
+                    </div>
+                </div>
                 <div class="quickai-input-area">
                     <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask a question about the selected text..." rows="3"></textarea>
                     <div class="quickai-controls">
@@ -219,6 +232,7 @@ async function createFloatingUI(rect, contextText, contextData = null) {
 
     // Add event listeners
     document.getElementById("quickai-close").addEventListener("click", closeUI);
+    document.getElementById("quickai-clear").addEventListener("click", clearConversation);
     document
       .getElementById("quickai-submit")
       .addEventListener("click", () => submitQuery(contextText));
@@ -235,6 +249,14 @@ async function createFloatingUI(rect, contextText, contextData = null) {
       chrome.storage.sync.set({ lastModel: e.target.value });
     });
 
+    // Add quick action button listeners
+    document.querySelectorAll(".quickai-action-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const action = e.target.dataset.action;
+        executeQuickAction(action, contextText);
+      });
+    });
+
     // Focus on textarea
     document.getElementById("quickai-prompt").focus();
 
@@ -245,15 +267,37 @@ async function createFloatingUI(rect, contextText, contextData = null) {
   }
 }
 
+// Execute quick action with predefined prompt
+async function executeQuickAction(action, contextText) {
+  const actionPrompts = {
+    summarize: "Please provide a concise summary of the following text:",
+    explain: "Please explain the following text in simple, easy-to-understand terms:",
+    grammar: "Please fix any grammar, spelling, or punctuation mistakes in the following text. Return the corrected version:",
+    improve: "Please improve the writing style of the following text while maintaining its meaning. Make it clearer and more engaging:",
+    translate: "Please translate the following text to English (or to Spanish if it's already in English):"
+  };
+
+  const prompt = actionPrompts[action];
+  if (!prompt) return;
+
+  // Programmatically submit the query
+  submitQueryWithPrompt(contextText, prompt);
+}
+
 // Submit query to AI
 async function submitQuery(contextText) {
   const prompt = document.getElementById("quickai-prompt").value.trim();
+  if (!prompt) return;
+  
+  submitQueryWithPrompt(contextText, prompt);
+}
+
+// Submit query with a specific prompt
+async function submitQueryWithPrompt(contextText, prompt) {
   const model = document.getElementById("quickai-model").value;
   const conversationArea = document.getElementById("quickai-conversation");
   const submitBtn = document.getElementById("quickai-submit");
   const promptInput = document.getElementById("quickai-prompt");
-
-  if (!prompt) return;
 
   // Add user message to conversation
   const userMessage = document.createElement("div");
@@ -261,8 +305,10 @@ async function submitQuery(contextText) {
   userMessage.innerHTML = `<div class="quickai-message-content">${escapeHtml(prompt)}</div>`;
   conversationArea.appendChild(userMessage);
 
-  // Clear input
-  promptInput.value = "";
+  // Clear input only if it matches the submitted prompt
+  if (promptInput && promptInput.value === prompt) {
+    promptInput.value = "";
+  }
 
   // Add AI message container with loading state
   const aiMessage = document.createElement("div");
@@ -279,6 +325,11 @@ async function submitQuery(contextText) {
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Processing...";
+  
+  // Disable all quick action buttons during processing
+  document.querySelectorAll(".quickai-action-btn").forEach(btn => {
+    btn.disabled = true;
+  });
 
   // Get stored context from the container
   let storedContext;
@@ -342,6 +393,11 @@ chrome.runtime.onMessage.addListener((message) => {
         submitBtn.textContent = "Submit";
       }
       
+      // Re-enable quick action buttons
+      document.querySelectorAll(".quickai-action-btn").forEach(btn => {
+        btn.disabled = false;
+      });
+      
       // Focus back on input for next message
       const promptInput = document.getElementById("quickai-prompt");
       if (promptInput) promptInput.focus();
@@ -355,6 +411,11 @@ chrome.runtime.onMessage.addListener((message) => {
         submitBtn.disabled = false;
         submitBtn.textContent = "Submit";
       }
+      
+      // Re-enable quick action buttons on error
+      document.querySelectorAll(".quickai-action-btn").forEach(btn => {
+        btn.disabled = false;
+      });
       break;
   }
 });
@@ -425,6 +486,19 @@ function closeUI() {
     conversationHistory = [];
   }
   // Don't clear fullContext here - keep it until new selection
+}
+
+// Clear conversation
+function clearConversation() {
+  const conversationArea = document.getElementById("quickai-conversation");
+  if (conversationArea) {
+    conversationArea.innerHTML = "";
+    conversationHistory = [];
+    
+    // Focus back on input
+    const promptInput = document.getElementById("quickai-prompt");
+    if (promptInput) promptInput.focus();
+  }
 }
 
 // Get available models
