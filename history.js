@@ -6,7 +6,7 @@ const refreshButton = document.getElementById('refresh-history');
 // Load and display history
 async function loadHistory() {
     try {
-        const { history = [] } = await chrome.storage.sync.get('history');
+        const { history = [] } = await chrome.storage.local.get('history');
         
         if (history.length === 0) {
             showEmptyState();
@@ -91,10 +91,15 @@ async function deleteHistoryItem(e) {
     const index = parseInt(e.currentTarget.dataset.index);
     
     if (confirm('Delete this conversation?')) {
-        const { history = [] } = await chrome.storage.sync.get('history');
-        history.splice(index, 1);
-        await chrome.storage.sync.set({ history });
-        loadHistory();
+        try {
+            const { history = [] } = await chrome.storage.local.get('history');
+            history.splice(index, 1);
+            await chrome.storage.local.set({ history });
+            loadHistory();
+        } catch (error) {
+            console.error('Failed to delete history item:', error);
+            alert('Failed to delete conversation. Please try again.');
+        }
     }
 }
 

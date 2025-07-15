@@ -141,17 +141,25 @@ Please provide helpful, relevant, and concise responses based on this context. F
 
 // Save conversation to history
 async function saveToHistory(conversation) {
-    const { history = [] } = await chrome.storage.sync.get('history');
-    
-    // Add new conversation to beginning
-    history.unshift(conversation);
-    
-    // Keep only last 100 conversations
-    if (history.length > 100) {
-        history.splice(100);
+    try {
+        const { history = [] } = await chrome.storage.local.get('history');
+        
+        // Add new conversation to beginning
+        history.unshift(conversation);
+        
+        // Keep only last 100 conversations
+        if (history.length > 100) {
+            history.splice(100);
+        }
+        
+        await chrome.storage.local.set({ history });
+    } catch (error) {
+        console.error('Failed to save conversation to history:', error);
+        // Check for quota exceeded error
+        if (error.message && error.message.includes('QUOTA_BYTES')) {
+            console.error('Storage quota exceeded. Consider reducing history size.');
+        }
     }
-    
-    await chrome.storage.sync.set({ history });
 }
 
 // Simple markdown formatter

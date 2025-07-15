@@ -4,6 +4,8 @@ let selectedText = "";
 let selectionRect = null;
 let fullContext = null;
 let conversationHistory = []; // Track conversation messages
+let originalSelection = null; // Store the original selection range
+let editableElement = null; // Store reference to editable element
 
 console.log("QuickAI content script loaded on:", window.location.href);
 
@@ -98,6 +100,131 @@ function getNextBlockElement(element) {
   return next;
 }
 
+// Check if element is editable
+function isEditableElement(element) {
+  if (!element) return false;
+  
+  // Check for textarea or text input
+  if (element.tagName === 'TEXTAREA' || 
+      (element.tagName === 'INPUT' && (element.type === 'text' || element.type === 'email' || element.type === 'search'))) {
+    return true;
+  }
+  
+  // Check for contenteditable
+  if (element.contentEditable === 'true' || element.isContentEditable) {
+    return true;
+  }
+  
+  // Check parent elements for contenteditable
+  let parent = element.parentElement;
+  while (parent) {
+    if (parent.contentEditable === 'true' || parent.isContentEditable) {
+      return true;
+    }
+    parent = parent.parentElement;
+  }
+  
+  // Special handling for Gmail compose area
+  if (element.getAttribute('role') === 'textbox' || 
+      element.getAttribute('g_editable') === 'true' ||
+      element.classList.contains('editable')) {
+    return true;
+  }
+  
+  // Special handling for Google Docs
+  if (element.classList.contains('kix-page-content-wrapper') ||
+      element.querySelector('.kix-page-content-wrapper') ||
+      element.closest('.kix-page')) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Get the editable container for a selection
+function getEditableContainer(selection) {
+  if (!selection || selection.rangeCount === 0) return null;
+  
+  const range = selection.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  const element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+  
+  // Check if the element itself is editable
+  if (isEditableElement(element)) {
+    return element;
+  }
+  
+  // Walk up the DOM tree to find editable parent
+  let parent = element.parentElement;
+  while (parent) {
+    if (isEditableElement(parent)) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+  
+  return null;
+}
+
+// Find the closest editable element to the current position
+function findNearestEditableElement(rect) {
+  // Get all standard editable elements
+  let editables = Array.from(document.querySelectorAll(
+    'textarea, input[type="text"], input[type="email"], input[type="search"], [contenteditable="true"], [role="textbox"], [g_editable="true"], .editable'
+  ));
+  
+  // Special handling for Gmail
+  const gmailCompose = document.querySelector('div[g_editable="true"]') || 
+                      document.querySelector('div[role="textbox"]') ||
+                      document.querySelector('div.editable');
+  if (gmailCompose && !editables.includes(gmailCompose)) {
+    editables.push(gmailCompose);
+  }
+  
+  // Special handling for Google Docs
+  const docsCanvas = document.querySelector('.kix-page-canvas') || 
+                    document.querySelector('.kix-page');
+  if (docsCanvas && !editables.includes(docsCanvas)) {
+    editables.push(docsCanvas);
+  }
+  
+  if (editables.length === 0) return null;
+  
+  // Filter out hidden or zero-size elements
+  editables = editables.filter(el => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  
+  if (editables.length === 0) return null;
+  if (editables.length === 1) return editables[0];
+  
+  // Find the closest one to our UI position
+  let closest = null;
+  let minDistance = Infinity;
+  
+  const uiCenterX = rect.left + (rect.right - rect.left) / 2;
+  const uiCenterY = rect.top + (rect.bottom - rect.top) / 2;
+  
+  editables.forEach(element => {
+    const elemRect = element.getBoundingClientRect();
+    const elemCenterX = elemRect.left + elemRect.width / 2;
+    const elemCenterY = elemRect.top + elemRect.height / 2;
+    
+    const distance = Math.sqrt(
+      Math.pow(uiCenterX - elemCenterX, 2) + 
+      Math.pow(uiCenterY - elemCenterY, 2)
+    );
+    
+    if (distance < minDistance) {
+      minDistance = distance;
+      closest = element;
+    }
+  });
+  
+  return closest;
+}
+
 // Handle text selection
 document.addEventListener("selectionchange", () => {
   const selection = window.getSelection();
@@ -109,11 +236,18 @@ document.addEventListener("selectionchange", () => {
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       selectionRect = range.getBoundingClientRect();
+      
+      // Store the original selection range and check if it's editable
+      originalSelection = range.cloneRange();
+      editableElement = getEditableContainer(selection);
+      
       showFloatingButton();
     }
   } else if (text.length === 0) {
     hideFloatingButton();
     fullContext = null;
+    originalSelection = null;
+    editableElement = null;
   }
 });
 
@@ -138,7 +272,7 @@ function showFloatingButton() {
     e.preventDefault();
     e.stopPropagation();
     hideFloatingButton();
-    createFloatingUI(selectionRect, selectedText, fullContext);
+    createFloatingUI(selectionRect, selectedText, fullContext, editableElement);
   });
 
   document.body.appendChild(floatingButton);
@@ -153,7 +287,7 @@ function hideFloatingButton() {
 }
 
 // Create the floating UI
-async function createFloatingUI(rect, contextText, contextData = null) {
+async function createFloatingUI(rect, contextText, contextData = null, editable = null) {
   try {
     // Use passed context data or fall back to global fullContext
     const currentContext = contextData || fullContext;
@@ -167,6 +301,17 @@ async function createFloatingUI(rect, contextText, contextData = null) {
     
     // Store context data on the container for later use
     container.dataset.fullContext = JSON.stringify(currentContext || { selected: contextText, before: "", after: "", full: contextText });
+    
+    // Store editable element reference on the container
+    // If no editable element from selection, try to find nearest one
+    const editableToUse = editable || editableElement || findNearestEditableElement(rect);
+    if (editableToUse) {
+      container.dataset.isEditable = "true";
+      // Update global reference if we found one
+      if (!editableElement) {
+        editableElement = editableToUse;
+      }
+    }
 
     // Position near selected text
     const top = window.scrollY + rect.bottom + 10;
@@ -177,8 +322,14 @@ async function createFloatingUI(rect, contextText, contextData = null) {
 
     // Load available models and last selected model
     const models = await getModels();
-    const { lastModel } = await chrome.storage.sync.get("lastModel");
-    const defaultModel = lastModel || models[0].id;
+    let lastModel = null;
+    try {
+      const result = await chrome.storage.sync.get("lastModel");
+      lastModel = result.lastModel;
+    } catch (error) {
+      console.warn("Could not access chrome.storage:", error);
+    }
+    const defaultModel = lastModel || models[0]?.id || "google/gemini-2.5-flash";
 
     console.log("Models loaded:", models.length, "Last model:", defaultModel);
 
@@ -246,7 +397,11 @@ async function createFloatingUI(rect, contextText, contextData = null) {
 
     // Save model selection
     document.getElementById("quickai-model").addEventListener("change", (e) => {
-      chrome.storage.sync.set({ lastModel: e.target.value });
+      try {
+        chrome.storage.sync.set({ lastModel: e.target.value });
+      } catch (error) {
+        console.warn("Could not save model selection:", error);
+      }
     });
 
     // Add quick action button listeners
@@ -343,29 +498,47 @@ async function submitQueryWithPrompt(contextText, prompt) {
   
   // Send to service worker with full context
   const contextToSend = storedContext || fullContext || { selected: contextText, before: "", after: "", full: contextText };
-  chrome.runtime.sendMessage({
-    type: "queryAI",
-    context: contextText,
-    fullContext: contextToSend,
-    prompt: prompt,
-    model: model,
-    messageId: currentMessageId, // Pass message ID for targeted updates
-  });
+  
+  try {
+    chrome.runtime.sendMessage({
+      type: "queryAI",
+      context: contextText,
+      fullContext: contextToSend,
+      prompt: prompt,
+      model: model,
+      messageId: currentMessageId, // Pass message ID for targeted updates
+    });
+  } catch (error) {
+    console.error("Failed to send message to service worker:", error);
+    const messageContent = aiMessage.querySelector(".quickai-message-content");
+    if (messageContent) {
+      messageContent.innerHTML = '<div class="quickai-error">Failed to connect to QuickAI service. Please refresh the page and try again.</div>';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit";
+    }
+    // Re-enable quick action buttons on error
+    document.querySelectorAll(".quickai-action-btn").forEach(btn => {
+      btn.disabled = false;
+    });
+  }
 }
 
 // Handle streaming responses
-chrome.runtime.onMessage.addListener((message) => {
-  const submitBtn = document.getElementById("quickai-submit");
-  const conversationArea = document.getElementById("quickai-conversation");
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message) => {
+    const submitBtn = document.getElementById("quickai-submit");
+    const conversationArea = document.getElementById("quickai-conversation");
 
-  if (!conversationArea) return;
+    if (!conversationArea) return;
 
-  // Find the target AI message
-  const aiMessage = document.getElementById(message.messageId);
-  if (!aiMessage) return;
+    // Find the target AI message
+    const aiMessage = document.getElementById(message.messageId);
+    if (!aiMessage) return;
 
-  const messageContent = aiMessage.querySelector(".quickai-message-content");
-  if (!messageContent) return;
+    const messageContent = aiMessage.querySelector(".quickai-message-content");
+    if (!messageContent) return;
 
   switch (message.type) {
     case "streamStart":
@@ -387,6 +560,16 @@ chrome.runtime.onMessage.addListener((message) => {
       copyBtn.innerHTML = "📋 Copy";
       copyBtn.onclick = () => copyResponse(messageContent.dataset.fullResponse);
       messageContent.appendChild(copyBtn);
+
+      // Add replace button if the selection was in an editable element
+      const container = document.getElementById("quickai-container");
+      if (container && container.dataset.isEditable === "true" && editableElement) {
+        const replaceBtn = document.createElement("button");
+        replaceBtn.className = "quickai-replace-btn";
+        replaceBtn.innerHTML = "↔️ Replace";
+        replaceBtn.onclick = () => replaceSelectedText(messageContent.dataset.fullResponse);
+        messageContent.appendChild(replaceBtn);
+      }
 
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -418,7 +601,8 @@ chrome.runtime.onMessage.addListener((message) => {
       });
       break;
   }
-});
+  });
+}
 
 // Copy response to clipboard
 async function copyResponse(text) {
@@ -443,9 +627,185 @@ async function copyResponse(text) {
   }
 }
 
+// Replace selected text with AI response
+async function replaceSelectedText(newText) {
+  try {
+    if (!editableElement) {
+      throw new Error("No editable element found");
+    }
+
+    // For textarea and input elements
+    if (editableElement.tagName === 'TEXTAREA' || editableElement.tagName === 'INPUT') {
+      editableElement.focus();
+      
+      // If we have a selection and selected text
+      if (originalSelection && selectedText) {
+        // Try to get the stored selection range from the original selection
+        let start, end;
+        
+        if (originalSelection && originalSelection.startContainer === editableElement.firstChild) {
+          // If we have the original selection within the element
+          start = originalSelection.startOffset;
+          end = originalSelection.endOffset;
+        } else {
+          // Fallback: search for the selected text in the element
+          const elementText = editableElement.value;
+          const searchIndex = elementText.indexOf(selectedText);
+          
+          if (searchIndex !== -1) {
+            start = searchIndex;
+            end = searchIndex + selectedText.length;
+          } else {
+            // No selected text found, append to current content
+            start = editableElement.value.length;
+            end = start;
+            if (editableElement.value && !editableElement.value.endsWith(' ')) {
+              newText = ' ' + newText;
+            }
+          }
+        }
+        
+        // Use setRangeText to replace and maintain undo history
+        editableElement.setRangeText(newText, start, end, 'end');
+      } else {
+        // No selection - append to existing content or replace all
+        if (editableElement.value.trim()) {
+          // If there's existing content, append
+          const separator = editableElement.value.endsWith(' ') ? '' : ' ';
+          editableElement.value += separator + newText;
+        } else {
+          // If empty, just set the value
+          editableElement.value = newText;
+        }
+      }
+      
+      // Dispatch input event to trigger any listeners
+      editableElement.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      // Show success feedback
+      showReplacementFeedback(true);
+      
+    } else if (editableElement.isContentEditable || editableElement.contentEditable === 'true' || 
+               editableElement.getAttribute('role') === 'textbox' || 
+               editableElement.getAttribute('g_editable') === 'true') {
+      // For contenteditable elements (including Gmail and Google Docs)
+      editableElement.focus();
+      
+      // Special handling for Google Docs
+      if (editableElement.classList.contains('kix-page') || editableElement.closest('.kix-page')) {
+        // Google Docs requires special handling - just copy to clipboard and notify user
+        await navigator.clipboard.writeText(newText);
+        showReplacementFeedback(true, "Copied to clipboard! Press Ctrl+V to paste in Google Docs");
+        return;
+      }
+      
+      const selection = window.getSelection();
+      
+      // Special handling for Gmail
+      if (editableElement.getAttribute('g_editable') === 'true' || 
+          editableElement.getAttribute('role') === 'textbox') {
+        // Gmail-specific approach
+        if (originalSelection && selectedText) {
+          selection.removeAllRanges();
+          selection.addRange(originalSelection);
+          
+          // Try multiple methods for Gmail compatibility
+          if (!document.execCommand('insertText', false, newText)) {
+            // Fallback: dispatch input events
+            const inputEvent = new InputEvent('beforeinput', {
+              inputType: 'insertText',
+              data: newText,
+              bubbles: true,
+              cancelable: true
+            });
+            editableElement.dispatchEvent(inputEvent);
+          }
+        } else {
+          // No selection - append to end
+          editableElement.focus();
+          selection.selectAllChildren(editableElement);
+          selection.collapseToEnd();
+          
+          const textToInsert = editableElement.textContent.trim() && !editableElement.textContent.endsWith(' ') 
+            ? ' ' + newText 
+            : newText;
+          document.execCommand('insertText', false, textToInsert);
+        }
+      } else {
+        // Standard contenteditable handling
+        if (originalSelection && selectedText) {
+          selection.removeAllRanges();
+          selection.addRange(originalSelection);
+          document.execCommand('insertText', false, newText);
+        } else {
+          // No selection - place cursor at end and insert
+          selection.removeAllRanges();
+          const range = document.createRange();
+          
+          if (editableElement.lastChild) {
+            range.selectNodeContents(editableElement.lastChild);
+            range.collapse(false);
+          } else {
+            range.selectNodeContents(editableElement);
+            range.collapse(false);
+          }
+          
+          selection.addRange(range);
+          
+          const textToInsert = editableElement.textContent.trim() && !editableElement.textContent.endsWith(' ') 
+            ? ' ' + newText 
+            : newText;
+          document.execCommand('insertText', false, textToInsert);
+        }
+      }
+      
+      // Show success feedback
+      showReplacementFeedback(true);
+    }
+  } catch (error) {
+    console.error("Failed to replace text:", error);
+    showReplacementFeedback(false);
+  }
+}
+
+// Show visual feedback after replacement
+function showReplacementFeedback(success, customMessage = null) {
+  const replaceBtn = document.querySelector(".quickai-replace-btn");
+  if (!replaceBtn) return;
+  
+  const originalText = replaceBtn.innerHTML;
+  
+  if (success) {
+    if (customMessage) {
+      // For Google Docs special case
+      replaceBtn.innerHTML = "📋 Copied!";
+      replaceBtn.title = customMessage;
+      replaceBtn.style.background = "#2196F3";
+    } else {
+      replaceBtn.innerHTML = "✅ Replaced!";
+      replaceBtn.style.background = "#4caf50";
+    }
+    
+    setTimeout(() => {
+      replaceBtn.innerHTML = originalText;
+      replaceBtn.style.background = "";
+      replaceBtn.title = "";
+    }, 3000);
+  } else {
+    replaceBtn.innerHTML = "❌ Failed";
+    replaceBtn.style.background = "#f44336";
+    
+    setTimeout(() => {
+      replaceBtn.innerHTML = originalText;
+      replaceBtn.style.background = "";
+    }, 2000);
+  }
+}
+
 // Handle context menu trigger
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "createUIFromContextMenu" && message.text) {
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "createUIFromContextMenu" && message.text) {
     console.log("Creating UI from context menu with text:", message.text);
 
     // Get current mouse position or use center of viewport
@@ -466,16 +826,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       // Extract full context from current selection
       fullContext = extractFullContext(selection);
+      // Store the original selection and check if editable
+      originalSelection = range.cloneRange();
+      editableElement = getEditableContainer(selection);
     } else {
       // No selection context available
       fullContext = null;
+      originalSelection = null;
+      editableElement = null;
     }
 
     hideFloatingButton();
-    createFloatingUI(rect, message.text, fullContext);
+    createFloatingUI(rect, message.text, fullContext, editableElement);
     sendResponse({ success: true });
-  }
-});
+    }
+  });
+}
 
 // Close UI
 function closeUI() {
@@ -505,7 +871,15 @@ function clearConversation() {
 async function getModels() {
   try {
     // Dynamically load models from models.js
-    const response = await fetch(chrome.runtime.getURL("models.js"));
+    let modelsUrl;
+    try {
+      modelsUrl = chrome.runtime.getURL("models.js");
+    } catch (error) {
+      console.warn("chrome.runtime not available, using fallback models");
+      return getFallbackModels();
+    }
+    
+    const response = await fetch(modelsUrl);
     const text = await response.text();
 
     // Extract the models array using a safe method
@@ -522,18 +896,20 @@ async function getModels() {
     throw new Error("Could not parse models from models.js");
   } catch (error) {
     console.error("Failed to load models from models.js:", error);
-
-    // Fallback to default models if loading fails
-    return [
-      { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-      { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-      { id: "anthropic/claude-sonnet-4", name: "Claude 4 Sonnet" },
-      { id: "anthropic/claude-opus-4", name: "Claude 4 Opus" },
-      { id: "anthropic/claude-sonnet-4", name: "Claude 4 Sonnet" },
-      { id: "openai/gpt-4.1", name: "GPT-4.1" },
-      { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini" },
-    ];
+    return getFallbackModels();
   }
+}
+
+// Get fallback models when chrome APIs are not available
+function getFallbackModels() {
+  return [
+    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { id: "anthropic/claude-sonnet-4", name: "Claude 4 Sonnet" },
+    { id: "anthropic/claude-opus-4", name: "Claude 4 Opus" },
+    { id: "openai/gpt-4.1", name: "GPT-4.1" },
+    { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini" },
+  ];
 }
 
 // Escape HTML for security

@@ -19,6 +19,7 @@ QuickAI is a Chrome Extension (Manifest V3) that provides instant AI assistance 
    - Floating UI creation and positioning
    - Streaming response display with markdown formatting
    - Model selection persistence
+   - In-place text replacement for editable elements
 
 3. **models.js** - AI model configuration:
    - Centralized list of available models
@@ -29,6 +30,23 @@ QuickAI is a Chrome Extension (Manifest V3) that provides instant AI assistance 
 - No build process - files are loaded directly
 - Permissions: storage, sidePanel, activeTab, contextMenus
 - Host permission: https://openrouter.ai/*
+
+## Features
+
+### In-Place Text Replacement
+- A "Replace" button appears alongside the AI response when near any editable element
+- Works in two modes:
+  1. **With Selection**: Replaces the selected text with the AI's response
+  2. **Without Selection**: Appends or inserts the AI's response into the nearest text field
+- Automatically detects the closest editable element on the page
+- Supported elements:
+  - Standard `<textarea>` and `<input>` elements
+  - ContentEditable elements (Gmail, Google Docs, etc.)
+- Features:
+  - Maintains undo/redo history
+  - Shows visual feedback on success/failure
+  - Smart insertion - adds appropriate spacing when appending text
+  - Works even when no text is selected
 
 ## Key Development Commands
 
@@ -97,3 +115,7 @@ Edit models.js:
 2. **API calls failing**: Verify API key in options, check OpenRouter status
 3. **UI not appearing**: Check content script injection, verify text selection
 4. **Streaming not working**: Ensure proper SSE parsing in service worker
+5. **Replace button not appearing**: Ensure text is selected within an editable element
+6. **Replace failing**: Check if the editable element still contains the original text
+7. **Gmail issues**: The extension uses special Gmail-specific handling for compose areas
+8. **Google Docs**: Due to Docs' security model, the Replace button copies text to clipboard instead

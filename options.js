@@ -18,7 +18,7 @@ async function loadSettings() {
 
 // Update history statistics
 async function updateHistoryStats() {
-    const { history = [] } = await chrome.storage.sync.get('history');
+    const { history = [] } = await chrome.storage.local.get('history');
     const totalConversations = history.length;
     const totalCharacters = history.reduce((sum, conv) => sum + conv.response.length, 0);
     
@@ -70,7 +70,7 @@ clearHistoryBtn.addEventListener('click', async () => {
     
     if (confirmed) {
         try {
-            await chrome.storage.sync.set({ history: [] });
+            await chrome.storage.local.set({ history: [] });
             showStatus('History cleared successfully', 'success');
             updateHistoryStats();
         } catch (error) {
