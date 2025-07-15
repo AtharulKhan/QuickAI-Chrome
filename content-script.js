@@ -2,8 +2,100 @@ let activeUI = null;
 let floatingButton = null;
 let selectedText = "";
 let selectionRect = null;
+let fullContext = null;
 
 console.log("QuickAI content script loaded on:", window.location.href);
+
+// Extract context paragraphs before and after selection
+function extractFullContext(selection) {
+  if (!selection || selection.rangeCount === 0) return null;
+  
+  const range = selection.getRangeAt(0);
+  const selectedText = selection.toString().trim();
+  
+  // Get the common ancestor container
+  const container = range.commonAncestorContainer;
+  const parentElement = container.nodeType === Node.TEXT_NODE 
+    ? container.parentElement 
+    : container;
+  
+  // Find the closest block-level parent
+  let blockParent = parentElement;
+  while (blockParent && !isBlockElement(blockParent)) {
+    blockParent = blockParent.parentElement;
+  }
+  
+  if (!blockParent) return { selected: selectedText, before: "", after: "" };
+  
+  // Get surrounding paragraphs
+  const paragraphs = [];
+  let currentBlock = blockParent;
+  
+  // Get 2 paragraphs before
+  const beforeBlocks = [];
+  let prevBlock = getPreviousBlockElement(currentBlock);
+  for (let i = 0; i < 2 && prevBlock; i++) {
+    const blockText = prevBlock.textContent.trim();
+    if (blockText) {
+      beforeBlocks.unshift(blockText);
+    }
+    prevBlock = getPreviousBlockElement(prevBlock);
+  }
+  
+  // Get 2 paragraphs after
+  const afterBlocks = [];
+  let nextBlock = getNextBlockElement(currentBlock);
+  for (let i = 0; i < 2 && nextBlock; i++) {
+    const blockText = nextBlock.textContent.trim();
+    if (blockText) {
+      afterBlocks.push(blockText);
+    }
+    nextBlock = getNextBlockElement(nextBlock);
+  }
+  
+  const result = {
+    selected: selectedText,
+    before: beforeBlocks.join('\n\n'),
+    after: afterBlocks.join('\n\n'),
+    full: [...beforeBlocks, selectedText, ...afterBlocks].join('\n\n')
+  };
+  
+  return result;
+}
+
+// Check if element is block-level
+function isBlockElement(element) {
+  const blockTags = ['P', 'DIV', 'SECTION', 'ARTICLE', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH'];
+  return blockTags.includes(element.tagName);
+}
+
+// Get previous block-level sibling or parent's sibling
+function getPreviousBlockElement(element) {
+  let prev = element.previousElementSibling;
+  while (prev && !isBlockElement(prev)) {
+    prev = prev.previousElementSibling;
+  }
+  
+  if (!prev && element.parentElement) {
+    return getPreviousBlockElement(element.parentElement);
+  }
+  
+  return prev;
+}
+
+// Get next block-level sibling or parent's sibling  
+function getNextBlockElement(element) {
+  let next = element.nextElementSibling;
+  while (next && !isBlockElement(next)) {
+    next = next.nextElementSibling;
+  }
+  
+  if (!next && element.parentElement) {
+    return getNextBlockElement(element.parentElement);
+  }
+  
+  return next;
+}
 
 // Handle text selection
 document.addEventListener("selectionchange", () => {
@@ -12,6 +104,7 @@ document.addEventListener("selectionchange", () => {
 
   if (text.length > 0 && !activeUI) {
     selectedText = text;
+    fullContext = extractFullContext(selection);
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       selectionRect = range.getBoundingClientRect();
@@ -19,6 +112,7 @@ document.addEventListener("selectionchange", () => {
     }
   } else if (text.length === 0) {
     hideFloatingButton();
+    fullContext = null;
   }
 });
 
@@ -43,7 +137,7 @@ function showFloatingButton() {
     e.preventDefault();
     e.stopPropagation();
     hideFloatingButton();
-    createFloatingUI(selectionRect, selectedText);
+    createFloatingUI(selectionRect, selectedText, fullContext);
   });
 
   document.body.appendChild(floatingButton);
@@ -58,15 +152,20 @@ function hideFloatingButton() {
 }
 
 // Create the floating UI
-async function createFloatingUI(rect, contextText) {
+async function createFloatingUI(rect, contextText, contextData = null) {
   try {
-    console.log("Creating floating UI...");
+    // Use passed context data or fall back to global fullContext
+    const currentContext = contextData || fullContext;
+    
 
     if (activeUI) activeUI.remove();
 
     const container = document.createElement("div");
     container.id = "quickai-container";
     container.className = "quickai-container";
+    
+    // Store context data on the container for later use
+    container.dataset.fullContext = JSON.stringify(currentContext || { selected: contextText, before: "", after: "", full: contextText });
 
     // Position near selected text
     const top = window.scrollY + rect.bottom + 10;
@@ -163,10 +262,22 @@ async function submitQuery(contextText) {
   responseArea.innerHTML = "";
   responseArea.dataset.fullResponse = ""; // Store full response for copying
 
-  // Send to service worker
+  // Get stored context from the container
+  let storedContext;
+  try {
+    const container = document.getElementById("quickai-container");
+    storedContext = container?.dataset.fullContext ? JSON.parse(container.dataset.fullContext) : null;
+  } catch (e) {
+    console.error("Error parsing stored context:", e);
+    storedContext = null;
+  }
+  
+  // Send to service worker with full context
+  const contextToSend = storedContext || fullContext || { selected: contextText, before: "", after: "", full: contextText };
   chrome.runtime.sendMessage({
     type: "queryAI",
     context: contextText,
+    fullContext: contextToSend,
     prompt: prompt,
     model: model,
   });
@@ -262,10 +373,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (selectionRect.width > 0 && selectionRect.height > 0) {
         Object.assign(rect, selectionRect);
       }
+      // Extract full context from current selection
+      fullContext = extractFullContext(selection);
+    } else {
+      // No selection context available
+      fullContext = null;
     }
 
     hideFloatingButton();
-    createFloatingUI(rect, message.text);
+    createFloatingUI(rect, message.text, fullContext);
     sendResponse({ success: true });
   }
 });
@@ -276,6 +392,7 @@ function closeUI() {
     activeUI.remove();
     activeUI = null;
   }
+  // Don't clear fullContext here - keep it until new selection
 }
 
 // Get available models

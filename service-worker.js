@@ -23,6 +23,18 @@ async function handleAIQuery(message, tabId) {
         // Notify start of streaming
         chrome.tabs.sendMessage(tabId, { type: 'streamStart' });
 
+        // Build system message with context
+        const systemMessage = message.fullContext ? 
+            `You are a helpful AI assistant. The user has selected the following text from a webpage: "${message.context}". 
+
+Here is additional context from the surrounding paragraphs:
+${message.fullContext.before ? `Before the selection:\n${message.fullContext.before}\n` : ''}
+${message.fullContext.after ? `After the selection:\n${message.fullContext.after}` : ''}
+
+Please provide helpful, relevant, and concise responses based on this context. Focus primarily on the selected text, but use the surrounding context to better understand the topic.` :
+            `You are a helpful AI assistant. The user has selected the following text from a webpage as context: "${message.context}". Please provide helpful, relevant, and concise responses based on this context.`;
+        
+
         // Make API request
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -37,7 +49,7 @@ async function handleAIQuery(message, tabId) {
                 messages: [
                     {
                         role: 'system',
-                        content: `You are a helpful AI assistant. The user has selected the following text from a webpage as context: "${message.context}". Please provide helpful, relevant, and concise responses based on this context.`
+                        content: systemMessage
                     },
                     {
                         role: 'user',
