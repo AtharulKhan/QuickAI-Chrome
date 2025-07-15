@@ -928,3 +928,45 @@ document.addEventListener("click", (e) => {
     }
   }
 });
+
+// Listen for Ctrl+C to show question mark with clipboard content
+document.addEventListener("keydown", async (e) => {
+  if (e.ctrlKey && e.key === 'c') {
+    // Give the browser time to copy to clipboard
+    setTimeout(async () => {
+      try {
+        // Read clipboard content
+        const clipboardText = await navigator.clipboard.readText();
+        
+        if (clipboardText && clipboardText.trim()) {
+          // Close any existing UI
+          closeUI();
+          
+          // Set the clipboard text as selected text
+          selectedText = clipboardText.trim();
+          fullContext = { selected: selectedText, before: "", after: "" };
+          conversationHistory = [];
+          
+          // Get cursor position to show the floating button
+          const mouseX = window.innerWidth / 2;
+          const mouseY = window.innerHeight / 2;
+          
+          // Create a fake selection rect at center of screen
+          selectionRect = {
+            left: mouseX - 50,
+            top: mouseY - 50,
+            right: mouseX + 50,
+            bottom: mouseY + 50,
+            width: 100,
+            height: 100
+          };
+          
+          // Show the floating button
+          showFloatingButton();
+        }
+      } catch (error) {
+        console.error("Failed to read clipboard:", error);
+      }
+    }, 100);
+  }
+});
