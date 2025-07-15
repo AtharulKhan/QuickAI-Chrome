@@ -108,68 +108,105 @@
     font-style: italic;
 }
 
-.quickai-response {
+.quickai-conversation {
     flex: 1;
     padding: 16px;
     overflow-y: auto;
     min-height: 100px;
-    max-height: 250px;
+    max-height: 300px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 14px;
     line-height: 1.6;
     color: #333;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.quickai-response:empty::before {
-    content: 'Response will appear here...';
+.quickai-conversation:empty::before {
+    content: 'Your conversation will appear here...';
     color: #ccc;
     font-style: italic;
+    align-self: center;
+    margin: auto;
 }
 
-.quickai-response p {
-    margin: 0 0 12px 0;
+/* Message styles */
+.quickai-message {
+    display: flex;
+    width: 100%;
 }
 
-.quickai-response p:last-child {
+.quickai-user-message {
+    justify-content: flex-end;
+}
+
+.quickai-ai-message {
+    justify-content: flex-start;
+}
+
+.quickai-message-content {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    word-wrap: break-word;
+}
+
+.quickai-user-message .quickai-message-content {
+    background: linear-gradient(135deg, #833ab4, #fd1d1d);
+    color: white;
+}
+
+.quickai-ai-message .quickai-message-content {
+    background: #f4f4f4;
+    color: #333;
+}
+
+/* AI message content formatting */
+.quickai-ai-message p {
+    margin: 0 0 8px 0;
+}
+
+.quickai-ai-message p:last-child {
     margin-bottom: 0;
 }
 
-.quickai-response strong {
+.quickai-ai-message strong {
     color: #111;
     font-weight: 600;
 }
 
-.quickai-response em {
+.quickai-ai-message em {
     font-style: italic;
 }
 
-.quickai-response code {
-    background: #f4f4f4;
+.quickai-ai-message code {
+    background: #e8e8e8;
     padding: 2px 6px;
     border-radius: 4px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 13px;
 }
 
-.quickai-response pre {
-    background: #f4f4f4;
+.quickai-ai-message pre {
+    background: #e8e8e8;
     padding: 12px;
     border-radius: 6px;
     overflow-x: auto;
-    margin: 12px 0;
+    margin: 8px 0;
 }
 
-.quickai-response pre code {
+.quickai-ai-message pre code {
     background: none;
     padding: 0;
 }
 
-.quickai-response ul, .quickai-response ol {
+.quickai-ai-message ul, .quickai-ai-message ol {
     margin: 8px 0;
     padding-left: 24px;
 }
 
-.quickai-response li {
+.quickai-ai-message li {
     margin: 4px 0;
 }
 
@@ -264,21 +301,21 @@
 }
 
 /* Scrollbar styling */
-.quickai-response::-webkit-scrollbar {
+.quickai-conversation::-webkit-scrollbar {
     width: 6px;
 }
 
-.quickai-response::-webkit-scrollbar-track {
+.quickai-conversation::-webkit-scrollbar-track {
     background: #f1f1f1;
     border-radius: 3px;
 }
 
-.quickai-response::-webkit-scrollbar-thumb {
+.quickai-conversation::-webkit-scrollbar-thumb {
     background: #ccc;
     border-radius: 3px;
 }
 
-.quickai-response::-webkit-scrollbar-thumb:hover {
+.quickai-conversation::-webkit-scrollbar-thumb:hover {
     background: #aaa;
 }
 
@@ -331,14 +368,14 @@
 
 /* Copy button */
 .quickai-copy-btn {
-    display: block;
-    margin: 12px auto 0;
-    padding: 6px 16px;
+    display: inline-block;
+    margin: 8px 0 0 0;
+    padding: 4px 12px;
     background: linear-gradient(135deg, #833ab4, #fd1d1d);
     color: white;
     border: none;
-    border-radius: 16px;
-    font-size: 13px;
+    border-radius: 12px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
@@ -347,5 +384,5 @@
 
 .quickai-copy-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(131, 58, 180, 0.3);
+    box-shadow: 0 2px 8px rgba(131, 58, 180, 0.3);
 }

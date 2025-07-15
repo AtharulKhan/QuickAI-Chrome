@@ -3,6 +3,7 @@ let floatingButton = null;
 let selectedText = "";
 let selectionRect = null;
 let fullContext = null;
+let conversationHistory = []; // Track conversation messages
 
 console.log("QuickAI content script loaded on:", window.location.href);
 
@@ -193,7 +194,7 @@ async function createFloatingUI(rect, contextText, contextData = null) {
                       contextText.substring(0, 100)
                     )}${contextText.length > 100 ? "..." : ""}</span>
                 </div>
-                <div id="quickai-response" class="quickai-response"></div>
+                <div id="quickai-conversation" class="quickai-conversation"></div>
                 <div class="quickai-input-area">
                     <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask a question about the selected text..." rows="3"></textarea>
                     <div class="quickai-controls">
@@ -248,19 +249,36 @@ async function createFloatingUI(rect, contextText, contextData = null) {
 async function submitQuery(contextText) {
   const prompt = document.getElementById("quickai-prompt").value.trim();
   const model = document.getElementById("quickai-model").value;
-  const responseArea = document.getElementById("quickai-response");
+  const conversationArea = document.getElementById("quickai-conversation");
   const submitBtn = document.getElementById("quickai-submit");
+  const promptInput = document.getElementById("quickai-prompt");
 
   if (!prompt) return;
 
-  // Show loading state
-  responseArea.innerHTML = '<div class="quickai-loader"></div>';
+  // Add user message to conversation
+  const userMessage = document.createElement("div");
+  userMessage.className = "quickai-message quickai-user-message";
+  userMessage.innerHTML = `<div class="quickai-message-content">${escapeHtml(prompt)}</div>`;
+  conversationArea.appendChild(userMessage);
+
+  // Clear input
+  promptInput.value = "";
+
+  // Add AI message container with loading state
+  const aiMessage = document.createElement("div");
+  aiMessage.className = "quickai-message quickai-ai-message";
+  aiMessage.id = `ai-message-${Date.now()}`;
+  aiMessage.innerHTML = '<div class="quickai-message-content"><div class="quickai-loader"></div></div>';
+  conversationArea.appendChild(aiMessage);
+
+  // Scroll to bottom
+  conversationArea.scrollTop = conversationArea.scrollHeight;
+
+  // Store message ID for streaming updates
+  const currentMessageId = aiMessage.id;
+
   submitBtn.disabled = true;
   submitBtn.textContent = "Processing...";
-
-  // Clear response area for streaming
-  responseArea.innerHTML = "";
-  responseArea.dataset.fullResponse = ""; // Store full response for copying
 
   // Get stored context from the container
   let storedContext;
@@ -280,27 +298,35 @@ async function submitQuery(contextText) {
     fullContext: contextToSend,
     prompt: prompt,
     model: model,
+    messageId: currentMessageId, // Pass message ID for targeted updates
   });
 }
 
 // Handle streaming responses
 chrome.runtime.onMessage.addListener((message) => {
-  const responseArea = document.getElementById("quickai-response");
   const submitBtn = document.getElementById("quickai-submit");
+  const conversationArea = document.getElementById("quickai-conversation");
 
-  if (!responseArea) return;
+  if (!conversationArea) return;
+
+  // Find the target AI message
+  const aiMessage = document.getElementById(message.messageId);
+  if (!aiMessage) return;
+
+  const messageContent = aiMessage.querySelector(".quickai-message-content");
+  if (!messageContent) return;
 
   switch (message.type) {
     case "streamStart":
-      responseArea.innerHTML = "";
-      responseArea.dataset.fullResponse = "";
+      messageContent.innerHTML = "";
+      messageContent.dataset.fullResponse = "";
       break;
 
     case "streamChunk":
-      responseArea.innerHTML += message.content;
-      responseArea.dataset.fullResponse =
-        (responseArea.dataset.fullResponse || "") + message.rawContent;
-      responseArea.scrollTop = responseArea.scrollHeight;
+      messageContent.innerHTML += message.content;
+      messageContent.dataset.fullResponse =
+        (messageContent.dataset.fullResponse || "") + message.rawContent;
+      conversationArea.scrollTop = conversationArea.scrollHeight;
       break;
 
     case "streamEnd":
@@ -308,17 +334,21 @@ chrome.runtime.onMessage.addListener((message) => {
       const copyBtn = document.createElement("button");
       copyBtn.className = "quickai-copy-btn";
       copyBtn.innerHTML = "📋 Copy";
-      copyBtn.onclick = () => copyResponse(responseArea.dataset.fullResponse);
-      responseArea.appendChild(copyBtn);
+      copyBtn.onclick = () => copyResponse(messageContent.dataset.fullResponse);
+      messageContent.appendChild(copyBtn);
 
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "Submit";
       }
+      
+      // Focus back on input for next message
+      const promptInput = document.getElementById("quickai-prompt");
+      if (promptInput) promptInput.focus();
       break;
 
     case "streamError":
-      responseArea.innerHTML = `<div class="quickai-error">Error: ${escapeHtml(
+      messageContent.innerHTML = `<div class="quickai-error">Error: ${escapeHtml(
         message.error
       )}</div>`;
       if (submitBtn) {
@@ -391,6 +421,8 @@ function closeUI() {
   if (activeUI) {
     activeUI.remove();
     activeUI = null;
+    // Clear conversation history when closing
+    conversationHistory = [];
   }
   // Don't clear fullContext here - keep it until new selection
 }

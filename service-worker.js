@@ -21,7 +21,10 @@ async function handleAIQuery(message, tabId) {
         }
 
         // Notify start of streaming
-        chrome.tabs.sendMessage(tabId, { type: 'streamStart' });
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId: message.messageId 
+        });
 
         // Build system message with context
         const systemMessage = message.fullContext ? 
@@ -100,7 +103,8 @@ Please provide helpful, relevant, and concise responses based on this context. F
                             chrome.tabs.sendMessage(tabId, {
                                 type: 'streamChunk',
                                 content: formattedContent,
-                                rawContent: content // Send raw content for copying
+                                rawContent: content, // Send raw content for copying
+                                messageId: message.messageId
                             });
                         }
                     } catch (e) {
@@ -120,13 +124,17 @@ Please provide helpful, relevant, and concise responses based on this context. F
         });
 
         // Notify completion
-        chrome.tabs.sendMessage(tabId, { type: 'streamEnd' });
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId: message.messageId 
+        });
 
     } catch (error) {
         console.error('QuickAI Error:', error);
         chrome.tabs.sendMessage(tabId, {
             type: 'streamError',
-            error: error.message
+            error: error.message,
+            messageId: message.messageId
         });
     }
 }
