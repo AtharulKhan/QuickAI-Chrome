@@ -41,6 +41,43 @@
         </div>
 
         <div class="section">
+            <h2>Prompt Templates</h2>
+            <p>Create and manage reusable prompt templates. Use @ in the chat to quickly access them.</p>
+            
+            <div class="templates-controls">
+                <button id="add-template" class="primary-button">Add New Template</button>
+                <button id="import-templates" class="secondary-button">Import</button>
+                <button id="export-templates" class="secondary-button">Export</button>
+            </div>
+
+            <div id="template-form" class="template-form" style="display: none;">
+                <div class="form-group">
+                    <label for="template-name">Template Name</label>
+                    <input type="text" id="template-name" placeholder="e.g., Email Reply" maxlength="50">
+                </div>
+                <div class="form-group">
+                    <label for="template-category">Category (optional)</label>
+                    <input type="text" id="template-category" placeholder="e.g., Email, Meeting, Research" maxlength="30">
+                </div>
+                <div class="form-group">
+                    <label for="template-content">Template Content</label>
+                    <textarea id="template-content" rows="4" placeholder="Write your template here. Use {{variable}} for placeholders."></textarea>
+                    <p class="hint">Tip: Use {{variable}} syntax to create placeholders that users can fill in.</p>
+                </div>
+                <div class="form-actions">
+                    <button id="save-template" class="primary-button">Save Template</button>
+                    <button id="cancel-template" class="secondary-button">Cancel</button>
+                </div>
+            </div>
+
+            <div id="templates-list" class="templates-list">
+                <div class="loading-templates">Loading templates...</div>
+            </div>
+
+            <input type="file" id="import-file" accept=".json" style="display: none;">
+        </div>
+
+        <div class="section">
             <h2>Usage Guide</h2>
             <div class="guide">
                 <div class="guide-item">

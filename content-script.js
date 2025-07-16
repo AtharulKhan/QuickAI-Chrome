@@ -563,11 +563,81 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
     document
       .getElementById("quickai-submit")
       .addEventListener("click", () => submitQuery(contextText));
-    document
-      .getElementById("quickai-prompt")
-      .addEventListener("keydown", (e) => {
+    const promptTextarea = document.getElementById("quickai-prompt");
+    promptTextarea.addEventListener("keydown", async (e) => {
+        // Handle template selector navigation first
+        if (templateSelectorActive) {
+          const handled = await handleTemplateSelectorKeyboard(e, promptTextarea);
+          if (handled) return;
+        }
+        
         if (e.key === "Enter" && e.ctrlKey) {
           submitQuery(contextText);
+        }
+      });
+      
+    // Add input event listener for @ detection
+    promptTextarea.addEventListener("input", async (e) => {
+        const cursorPos = promptTextarea.selectionStart;
+        const textBefore = promptTextarea.value.substring(0, cursorPos);
+        
+        // Check if @ was just typed
+        const atSymbolIndex = textBefore.lastIndexOf('@');
+        console.log('QuickAI: Input detected - cursor:', cursorPos, 'atSymbolIndex:', atSymbolIndex, 'text:', textBefore);
+        
+        if (atSymbolIndex !== -1 && atSymbolIndex === cursorPos - 1) {
+          // @ was just typed, show template selector
+          templateSelectorActive = true;
+          templateSearchQuery = '';
+          selectedTemplateIndex = 0;
+          
+          const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+          console.log('Loading templates:', promptTemplates);
+          
+          // If no templates exist, show a helpful message
+          if (promptTemplates.length === 0) {
+            // Remove any existing selector first
+            const existingSelector = document.getElementById('quickai-template-selector');
+            if (existingSelector) existingSelector.remove();
+            
+            const noTemplatesDiv = document.createElement('div');
+            noTemplatesDiv.id = 'quickai-template-selector';
+            noTemplatesDiv.className = 'quickai-template-selector';
+            noTemplatesDiv.style.cssText = `
+              position: fixed;
+              top: ${promptTextarea.getBoundingClientRect().top - 100}px;
+              left: ${promptTextarea.getBoundingClientRect().left}px;
+              padding: 12px;
+              background: white;
+              border: 1px solid #e0e0e0;
+              border-radius: 8px;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+              z-index: 2147483650;
+              font-size: 13px;
+              color: #666;
+            `;
+            noTemplatesDiv.textContent = 'No templates found. Add templates in the extension options.';
+            document.body.appendChild(noTemplatesDiv);
+            console.log('QuickAI: Showing no templates message');
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+              noTemplatesDiv.remove();
+              closeTemplateSelector();
+            }, 3000);
+          } else {
+            createTemplateSelector(promptTextarea, promptTemplates);
+          }
+        } else if (templateSelectorActive && atSymbolIndex !== -1) {
+          // Update search query if @ is still present
+          templateSearchQuery = textBefore.substring(atSymbolIndex + 1);
+          selectedTemplateIndex = 0;
+          
+          const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+          createTemplateSelector(promptTextarea, promptTemplates, templateSearchQuery);
+        } else if (templateSelectorActive) {
+          // @ was deleted, close selector
+          closeTemplateSelector();
         }
       });
 
@@ -763,11 +833,81 @@ async function createFloatingUIForLink(rect, linkUrl, linkText) {
     document
       .getElementById("quickai-submit")
       .addEventListener("click", () => submitQueryForLink(linkUrl, linkText));
-    document
-      .getElementById("quickai-prompt")
-      .addEventListener("keydown", (e) => {
+    const promptTextarea = document.getElementById("quickai-prompt");
+    promptTextarea.addEventListener("keydown", async (e) => {
+        // Handle template selector navigation first
+        if (templateSelectorActive) {
+          const handled = await handleTemplateSelectorKeyboard(e, promptTextarea);
+          if (handled) return;
+        }
+        
         if (e.key === "Enter" && e.ctrlKey) {
           submitQueryForLink(linkUrl, linkText);
+        }
+      });
+      
+    // Add input event listener for @ detection
+    promptTextarea.addEventListener("input", async (e) => {
+        const cursorPos = promptTextarea.selectionStart;
+        const textBefore = promptTextarea.value.substring(0, cursorPos);
+        
+        // Check if @ was just typed
+        const atSymbolIndex = textBefore.lastIndexOf('@');
+        console.log('QuickAI: Input detected - cursor:', cursorPos, 'atSymbolIndex:', atSymbolIndex, 'text:', textBefore);
+        
+        if (atSymbolIndex !== -1 && atSymbolIndex === cursorPos - 1) {
+          // @ was just typed, show template selector
+          templateSelectorActive = true;
+          templateSearchQuery = '';
+          selectedTemplateIndex = 0;
+          
+          const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+          console.log('Loading templates:', promptTemplates);
+          
+          // If no templates exist, show a helpful message
+          if (promptTemplates.length === 0) {
+            // Remove any existing selector first
+            const existingSelector = document.getElementById('quickai-template-selector');
+            if (existingSelector) existingSelector.remove();
+            
+            const noTemplatesDiv = document.createElement('div');
+            noTemplatesDiv.id = 'quickai-template-selector';
+            noTemplatesDiv.className = 'quickai-template-selector';
+            noTemplatesDiv.style.cssText = `
+              position: fixed;
+              top: ${promptTextarea.getBoundingClientRect().top - 100}px;
+              left: ${promptTextarea.getBoundingClientRect().left}px;
+              padding: 12px;
+              background: white;
+              border: 1px solid #e0e0e0;
+              border-radius: 8px;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+              z-index: 2147483650;
+              font-size: 13px;
+              color: #666;
+            `;
+            noTemplatesDiv.textContent = 'No templates found. Add templates in the extension options.';
+            document.body.appendChild(noTemplatesDiv);
+            console.log('QuickAI: Showing no templates message');
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+              noTemplatesDiv.remove();
+              closeTemplateSelector();
+            }, 3000);
+          } else {
+            createTemplateSelector(promptTextarea, promptTemplates);
+          }
+        } else if (templateSelectorActive && atSymbolIndex !== -1) {
+          // Update search query if @ is still present
+          templateSearchQuery = textBefore.substring(atSymbolIndex + 1);
+          selectedTemplateIndex = 0;
+          
+          const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+          createTemplateSelector(promptTextarea, promptTemplates, templateSearchQuery);
+        } else if (templateSelectorActive) {
+          // @ was deleted, close selector
+          closeTemplateSelector();
         }
       });
 
@@ -1685,6 +1825,230 @@ function closeUI() {
   // Don't clear fullContext here - keep it until new selection
 }
 
+// Template selector state
+let templateSelectorActive = false;
+let templateSearchQuery = '';
+let selectedTemplateIndex = 0;
+
+// Create template selector UI
+function createTemplateSelector(textarea, templates, searchQuery = '') {
+  console.log('Creating template selector with templates:', templates, 'search:', searchQuery);
+  
+  // Remove existing selector
+  const existingSelector = document.getElementById('quickai-template-selector');
+  if (existingSelector) existingSelector.remove();
+  
+  // Filter templates based on search query
+  const filteredTemplates = templates.filter(t => 
+    t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.content.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  
+  console.log('Filtered templates:', filteredTemplates);
+  
+  // Show message if no templates exist at all
+  if (templates.length === 0) {
+    const selector = document.createElement('div');
+    selector.id = 'quickai-template-selector';
+    selector.className = 'quickai-template-selector';
+    selector.innerHTML = '<div class="quickai-template-item">No templates yet. Add templates in extension options.</div>';
+    
+    const textareaRect = textarea.getBoundingClientRect();
+    selector.style.position = 'fixed';
+    selector.style.left = `${textareaRect.left}px`;
+    selector.style.top = `${textareaRect.top - 60}px`;
+    selector.style.zIndex = '2147483650';
+    
+    document.body.appendChild(selector);
+    console.log('Created empty templates message');
+    return selector;
+  }
+  
+  if (filteredTemplates.length === 0) return null;
+  
+  const selector = document.createElement('div');
+  selector.id = 'quickai-template-selector';
+  selector.className = 'quickai-template-selector';
+  
+  // Position above textarea
+  const textareaRect = textarea.getBoundingClientRect();
+  const caretCoordinates = getCaretCoordinates(textarea, textarea.selectionStart);
+  
+  selector.style.position = 'fixed';
+  
+  // Calculate position - try to position above the textarea
+  let top = textareaRect.top - 210; // 200px max height + 10px margin
+  
+  // If it would go off screen, position below instead
+  if (top < 10) {
+    top = textareaRect.bottom + 10;
+  }
+  
+  selector.style.top = `${top}px`;
+  selector.style.left = `${Math.max(10, textareaRect.left + caretCoordinates.left)}px`;
+  selector.style.maxHeight = '200px';
+  selector.style.overflowY = 'auto';
+  selector.style.zIndex = '2147483650'; // Higher than the main container
+  
+  // Create template items
+  filteredTemplates.forEach((template, index) => {
+    const item = document.createElement('div');
+    item.className = 'quickai-template-item';
+    if (index === selectedTemplateIndex) {
+      item.classList.add('selected');
+    }
+    
+    item.innerHTML = `
+      <div class="template-name">${escapeHtml(template.name)}</div>
+      ${template.category ? `<div class="template-category">${escapeHtml(template.category)}</div>` : ''}
+      <div class="template-preview">${escapeHtml(template.content.substring(0, 50))}...</div>
+    `;
+    
+    item.addEventListener('click', () => {
+      insertTemplate(textarea, template);
+    });
+    
+    selector.appendChild(item);
+  });
+  
+  document.body.appendChild(selector);
+  console.log('Template selector added to DOM:', selector);
+  return selector;
+}
+
+// Get caret coordinates for positioning
+function getCaretCoordinates(element, position) {
+  const div = document.createElement('div');
+  const style = getComputedStyle(element);
+  const properties = ['boxSizing', 'width', 'height', 'overflowX', 'overflowY', 
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize',
+    'fontSizeAdjust', 'lineHeight', 'fontFamily', 'textAlign', 'textTransform',
+    'textIndent', 'textDecoration', 'letterSpacing', 'wordSpacing'];
+  
+  properties.forEach(prop => {
+    div.style[prop] = style[prop];
+  });
+  
+  div.style.position = 'absolute';
+  div.style.visibility = 'hidden';
+  div.style.whiteSpace = 'pre-wrap';
+  div.style.wordWrap = 'break-word';
+  
+  document.body.appendChild(div);
+  
+  div.textContent = element.value.substring(0, position);
+  const span = document.createElement('span');
+  span.textContent = element.value.substring(position) || '.';
+  div.appendChild(span);
+  
+  const coordinates = {
+    left: span.offsetLeft + parseInt(style.borderLeftWidth),
+    top: span.offsetTop - element.scrollTop + parseInt(style.borderTopWidth)
+  };
+  
+  document.body.removeChild(div);
+  return coordinates;
+}
+
+// Insert template into textarea
+function insertTemplate(textarea, template) {
+  const cursorPos = textarea.selectionStart;
+  const textBefore = textarea.value.substring(0, cursorPos);
+  const textAfter = textarea.value.substring(cursorPos);
+  
+  // Find the @ symbol position
+  const atSymbolIndex = textBefore.lastIndexOf('@');
+  const newTextBefore = textBefore.substring(0, atSymbolIndex);
+  
+  // Insert the template content
+  textarea.value = newTextBefore + template.content + textAfter;
+  
+  // Set cursor position after the inserted template
+  const newCursorPos = newTextBefore.length + template.content.length;
+  textarea.setSelectionRange(newCursorPos, newCursorPos);
+  textarea.focus();
+  
+  // Close template selector
+  closeTemplateSelector();
+  
+  // If template has placeholders, select the first one
+  const placeholderMatch = template.content.match(/\{\{(\w+)\}\}/);
+  if (placeholderMatch) {
+    const placeholderStart = newTextBefore.length + placeholderMatch.index;
+    const placeholderEnd = placeholderStart + placeholderMatch[0].length;
+    textarea.setSelectionRange(placeholderStart, placeholderEnd);
+  }
+}
+
+// Close template selector
+function closeTemplateSelector() {
+  const selector = document.getElementById('quickai-template-selector');
+  if (selector) selector.remove();
+  templateSelectorActive = false;
+  templateSearchQuery = '';
+  selectedTemplateIndex = 0;
+}
+
+// Handle template selector keyboard navigation
+async function handleTemplateSelectorKeyboard(e, textarea) {
+  const selector = document.getElementById('quickai-template-selector');
+  if (!selector) return false;
+  
+  const items = selector.querySelectorAll('.quickai-template-item');
+  
+  switch(e.key) {
+    case 'ArrowDown':
+      e.preventDefault();
+      selectedTemplateIndex = Math.min(selectedTemplateIndex + 1, items.length - 1);
+      updateSelectedTemplate(items);
+      return true;
+      
+    case 'ArrowUp':
+      e.preventDefault();
+      selectedTemplateIndex = Math.max(selectedTemplateIndex - 1, 0);
+      updateSelectedTemplate(items);
+      return true;
+      
+    case 'Enter':
+    case 'Tab':
+      e.preventDefault();
+      if (items[selectedTemplateIndex]) {
+        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        const filteredTemplates = promptTemplates.filter(t => 
+          t.name.toLowerCase().includes(templateSearchQuery.toLowerCase()) ||
+          t.category?.toLowerCase().includes(templateSearchQuery.toLowerCase()) ||
+          t.content.toLowerCase().includes(templateSearchQuery.toLowerCase())
+        );
+        if (filteredTemplates[selectedTemplateIndex]) {
+          insertTemplate(textarea, filteredTemplates[selectedTemplateIndex]);
+        }
+      }
+      return true;
+      
+    case 'Escape':
+      e.preventDefault();
+      closeTemplateSelector();
+      return true;
+  }
+  
+  return false;
+}
+
+// Update selected template visual
+function updateSelectedTemplate(items) {
+  items.forEach((item, index) => {
+    if (index === selectedTemplateIndex) {
+      item.classList.add('selected');
+      item.scrollIntoView({ block: 'nearest' });
+    } else {
+      item.classList.remove('selected');
+    }
+  });
+}
+
 // Clear conversation
 function clearConversation() {
   const conversationArea = document.getElementById("quickai-conversation");
@@ -2445,9 +2809,44 @@ function createGoogleSearchUI(rect, searchQuery) {
   document.getElementById("quickai-clear").addEventListener("click", clearConversation);
   document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
   document.getElementById("quickai-submit").addEventListener("click", () => submitGoogleQuery());
-  document.getElementById("quickai-prompt").addEventListener("keydown", (e) => {
+  const promptTextarea = document.getElementById("quickai-prompt");
+  promptTextarea.addEventListener("keydown", async (e) => {
+    // Handle template selector navigation first
+    if (templateSelectorActive) {
+      const handled = await handleTemplateSelectorKeyboard(e, promptTextarea);
+      if (handled) return;
+    }
+    
     if (e.key === "Enter" && e.ctrlKey) {
       submitGoogleQuery();
+    }
+  });
+  
+  // Add input event listener for @ detection
+  promptTextarea.addEventListener("input", async (e) => {
+    const cursorPos = promptTextarea.selectionStart;
+    const textBefore = promptTextarea.value.substring(0, cursorPos);
+    
+    // Check if @ was just typed
+    const atSymbolIndex = textBefore.lastIndexOf('@');
+    if (atSymbolIndex !== -1 && atSymbolIndex === cursorPos - 1) {
+      // @ was just typed, show template selector
+      templateSelectorActive = true;
+      templateSearchQuery = '';
+      selectedTemplateIndex = 0;
+      
+      const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+      createTemplateSelector(promptTextarea, promptTemplates);
+    } else if (templateSelectorActive && atSymbolIndex !== -1) {
+      // Update search query if @ is still present
+      templateSearchQuery = textBefore.substring(atSymbolIndex + 1);
+      selectedTemplateIndex = 0;
+      
+      const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+      createTemplateSelector(promptTextarea, promptTemplates, templateSearchQuery);
+    } else if (templateSelectorActive) {
+      // @ was deleted, close selector
+      closeTemplateSelector();
     }
   });
 
@@ -2627,3 +3026,27 @@ function updateGoogleSearchError(errorMessage) {
     progressStatus.style.color = "#d32f2f";
   }
 }
+
+// Debug function to test template loading (accessible from console)
+window.debugQuickAITemplates = async function() {
+  try {
+    const result = await chrome.storage.sync.get('promptTemplates');
+    console.log('QuickAI Debug - Storage result:', result);
+    console.log('QuickAI Debug - Templates:', result.promptTemplates);
+    console.log('QuickAI Debug - Templates length:', result.promptTemplates ? result.promptTemplates.length : 0);
+    
+    // Test creating the selector
+    const testTextarea = document.querySelector('#quickai-prompt');
+    if (testTextarea && result.promptTemplates) {
+      console.log('QuickAI Debug - Testing createTemplateSelector with textarea:', testTextarea);
+      createTemplateSelector(testTextarea, result.promptTemplates || []);
+    } else {
+      console.log('QuickAI Debug - No QuickAI textarea found or no templates');
+    }
+    
+    return result.promptTemplates || [];
+  } catch (error) {
+    console.error('QuickAI Debug - Error:', error);
+    return [];
+  }
+};

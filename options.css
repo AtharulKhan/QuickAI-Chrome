@@ -257,3 +257,135 @@ kbd {
 .footer a:hover {
     text-decoration: underline;
 }
+
+/* Template Section Styles */
+.templates-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.secondary-button {
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #666;
+    background: white;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.secondary-button:hover {
+    background: #f9fafb;
+    border-color: #d1d5db;
+}
+
+.template-form {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.template-form textarea {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    resize: vertical;
+    min-height: 100px;
+    font-family: inherit;
+}
+
+.form-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.templates-list {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.template-category {
+    margin-bottom: 24px;
+}
+
+.template-category h4 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #833ab4;
+}
+
+.template-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.template-item {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.2s;
+}
+
+.template-item:hover {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+}
+
+.template-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.template-header h5 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.template-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.template-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.template-actions button:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.template-content {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.empty-state, .loading-templates {
+    text-align: center;
+    padding: 48px;
+    color: #999;
+    font-size: 14px;
+}
