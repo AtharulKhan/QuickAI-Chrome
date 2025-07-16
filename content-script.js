@@ -455,6 +455,14 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                 <div class="quickai-header">
                     <span class="quickai-title">QuickAI</span>
                     <div class="quickai-header-buttons">
+                        <button id="quickai-tab-selector" class="quickai-tab-selector-btn" title="Include tab content">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="2" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                                <rect x="9" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                                <rect x="2" y="9" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                                <rect x="9" y="9" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                            </svg>
+                        </button>
                         <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
                         <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
                         <button id="quickai-close" class="quickai-close">&times;</button>
@@ -472,6 +480,9 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                         <span class="quickai-toggle-text">Include Full Page Context</span>
                     </label>
                     <span id="quickai-page-context-indicator" class="quickai-page-context-indicator"></span>
+                </div>
+                <div id="quickai-context-indicators" class="quickai-context-indicators" style="display: none;">
+                    <span class="quickai-context-indicator-label">Context:</span>
                 </div>
                 <div id="quickai-conversation" class="quickai-conversation"></div>
                 <div class="quickai-quick-actions">
@@ -550,6 +561,11 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
     // Add voice button listener
     document.getElementById("quickai-voice").addEventListener("click", () => {
       startVoiceRecognition();
+    });
+
+    // Add tab selector button listener
+    document.getElementById("quickai-tab-selector").addEventListener("click", () => {
+      openTabSelector();
     });
 
     // Add page context toggle listener
@@ -651,6 +667,14 @@ async function createFloatingUIForLink(rect, linkUrl, linkText) {
         <div class="quickai-header">
           <span class="quickai-title">QuickAI - Link Summary</span>
           <div class="quickai-header-buttons">
+            <button id="quickai-tab-selector" class="quickai-tab-selector-btn" title="Include tab content">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                <rect x="9" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                <rect x="2" y="9" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                <rect x="9" y="9" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </button>
             <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
             <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
             <button id="quickai-close" class="quickai-close">&times;</button>
@@ -660,6 +684,9 @@ async function createFloatingUIForLink(rect, linkUrl, linkText) {
           <strong>Link:</strong> <a href="${escapeHtml(linkUrl)}" target="_blank" class="quickai-context-link">${escapeHtml(
             linkText.length > 50 ? linkText.substring(0, 50) + "..." : linkText
           )}</a>
+        </div>
+        <div id="quickai-context-indicators" class="quickai-context-indicators" style="display: none;">
+          <span class="quickai-context-indicator-label">Context:</span>
         </div>
         <div id="quickai-conversation" class="quickai-conversation">
           <div class="quickai-message quickai-ai-message">
@@ -726,6 +753,11 @@ async function createFloatingUIForLink(rect, linkUrl, linkText) {
     // Add voice button listener
     document.getElementById("quickai-voice").addEventListener("click", () => {
       startVoiceRecognition();
+    });
+
+    // Add tab selector button listener
+    document.getElementById("quickai-tab-selector").addEventListener("click", () => {
+      openTabSelector();
     });
 
     // Automatically start summarizing the link
@@ -1257,6 +1289,14 @@ async function submitQueryWithPrompt(contextText, prompt) {
   // Send to service worker with full context
   const contextToSend = storedContext || fullContext || { selected: contextText, before: "", after: "", full: contextText };
   
+  // Prepare tab contexts for sending
+  const tabContentsArray = Array.from(tabContexts.entries()).map(([tabId, content]) => ({
+    tabId,
+    title: content.title,
+    url: content.url,
+    content: content.content
+  }));
+  
   try {
     chrome.runtime.sendMessage({
       type: "queryAI",
@@ -1264,6 +1304,7 @@ async function submitQueryWithPrompt(contextText, prompt) {
       fullContext: contextToSend,
       pageContent: pageContent,
       includePageContext: includePageContext,
+      tabContexts: tabContentsArray, // Send tab contexts
       prompt: prompt,
       model: model,
       messageId: currentMessageId, // Pass message ID for targeted updates
@@ -1633,13 +1674,37 @@ function toggleExpand() {
   const expandBtn = document.getElementById("quickai-expand");
   
   if (container.classList.contains("quickai-expanded")) {
+    // Collapse
     container.classList.remove("quickai-expanded");
     expandBtn.innerHTML = "⬜";
     expandBtn.title = "Expand";
+    
+    // Remove backdrop
+    const backdrop = document.querySelector(".quickai-modal-backdrop");
+    if (backdrop) {
+      backdrop.classList.remove("active");
+      setTimeout(() => backdrop.remove(), 300);
+    }
   } else {
+    // Expand
     container.classList.add("quickai-expanded");
     expandBtn.innerHTML = "⬛";
     expandBtn.title = "Collapse";
+    
+    // Add backdrop
+    const backdrop = document.createElement("div");
+    backdrop.className = "quickai-modal-backdrop";
+    document.body.appendChild(backdrop);
+    
+    // Animate in
+    setTimeout(() => {
+      backdrop.classList.add("active");
+    }, 10);
+    
+    // Close on backdrop click
+    backdrop.addEventListener("click", () => {
+      toggleExpand(); // Collapse when backdrop clicked
+    });
   }
 }
 
@@ -1920,4 +1985,309 @@ function startVoiceRecognition() {
     console.error('Failed to start speech recognition:', error);
     alert('Failed to start voice recognition. Please try again.');
   }
+}
+
+// Tab selection functionality
+let selectedTabs = new Set();
+let tabSelectorModal = null;
+let tabContexts = new Map(); // Store scraped tab contents
+
+function openTabSelector() {
+  // Create backdrop with higher z-index for tab selector
+  const backdrop = document.createElement("div");
+  backdrop.className = "quickai-modal-backdrop";
+  backdrop.style.zIndex = "2147483648";
+  document.body.appendChild(backdrop);
+  
+  // Create modal
+  tabSelectorModal = document.createElement("div");
+  tabSelectorModal.className = "quickai-tab-selector-modal";
+  
+  tabSelectorModal.innerHTML = `
+    <div class="quickai-tab-selector-header">
+      <h3 class="quickai-tab-selector-title">Select Tabs for Context</h3>
+      <button class="quickai-tab-selector-close">&times;</button>
+    </div>
+    <div class="quickai-tab-selector-search">
+      <input type="text" class="quickai-tab-search-input" placeholder="Search tabs by title or URL...">
+    </div>
+    <div class="quickai-tab-selector-body">
+      <div class="quickai-tab-list">
+        <div class="quickai-loader" style="margin: 40px auto;"></div>
+      </div>
+    </div>
+    <div class="quickai-tab-selector-footer">
+      <span class="quickai-tab-count">0 tabs selected</span>
+      <div class="quickai-tab-selector-actions">
+        <button class="quickai-tab-selector-cancel">Cancel</button>
+        <button class="quickai-tab-selector-confirm" disabled>Add to Context</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(tabSelectorModal);
+  
+  // Animate in
+  setTimeout(() => {
+    backdrop.classList.add("active");
+  }, 10);
+  
+  // Load tabs
+  loadTabs();
+  
+  // Add event listeners
+  const closeBtn = tabSelectorModal.querySelector(".quickai-tab-selector-close");
+  const cancelBtn = tabSelectorModal.querySelector(".quickai-tab-selector-cancel");
+  const confirmBtn = tabSelectorModal.querySelector(".quickai-tab-selector-confirm");
+  const searchInput = tabSelectorModal.querySelector(".quickai-tab-search-input");
+  
+  closeBtn.addEventListener("click", closeTabSelector);
+  cancelBtn.addEventListener("click", closeTabSelector);
+  confirmBtn.addEventListener("click", confirmTabSelection);
+  searchInput.addEventListener("input", filterTabs);
+  
+  // Close on backdrop click
+  backdrop.addEventListener("click", closeTabSelector);
+  
+  // Focus search input
+  searchInput.focus();
+}
+
+function closeTabSelector() {
+  const backdrop = document.querySelector(".quickai-modal-backdrop");
+  if (backdrop) {
+    backdrop.classList.remove("active");
+    setTimeout(() => backdrop.remove(), 300);
+  }
+  if (tabSelectorModal) {
+    tabSelectorModal.remove();
+    tabSelectorModal = null;
+  }
+}
+
+async function loadTabs() {
+  try {
+    // Request tabs from service worker
+    chrome.runtime.sendMessage({ type: "getTabs" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to get tabs:", chrome.runtime.lastError);
+        showTabError();
+        return;
+      }
+      
+      if (response && response.tabs) {
+        displayTabs(response.tabs);
+      }
+    });
+  } catch (error) {
+    console.error("Error loading tabs:", error);
+    showTabError();
+  }
+}
+
+function displayTabs(tabs) {
+  const tabList = tabSelectorModal.querySelector(".quickai-tab-list");
+  
+  // Filter out current tab
+  const currentTabUrl = window.location.href;
+  const filteredTabs = tabs.filter(tab => tab.url !== currentTabUrl);
+  
+  if (filteredTabs.length === 0) {
+    tabList.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: #666;">
+        No other tabs found. Open some tabs and try again.
+      </div>
+    `;
+    return;
+  }
+  
+  tabList.innerHTML = filteredTabs.map(tab => `
+    <div class="quickai-tab-item" data-tab-id="${tab.id}">
+      <input type="checkbox" class="quickai-tab-checkbox" data-tab-id="${tab.id}">
+      ${tab.favIconUrl ? `<img src="${escapeHtml(tab.favIconUrl)}" class="quickai-tab-favicon" onerror="this.style.display='none'">` : ''}
+      <div class="quickai-tab-info">
+        <div class="quickai-tab-title">${escapeHtml(tab.title || 'Untitled')}</div>
+        <div class="quickai-tab-url">${escapeHtml(new URL(tab.url).hostname)}</div>
+      </div>
+    </div>
+  `).join('');
+  
+  // Add click handlers
+  tabList.querySelectorAll(".quickai-tab-item").forEach(item => {
+    const checkbox = item.querySelector(".quickai-tab-checkbox");
+    const tabId = parseInt(item.dataset.tabId);
+    
+    item.addEventListener("click", (e) => {
+      if (e.target !== checkbox) {
+        checkbox.checked = !checkbox.checked;
+        toggleTabSelection(tabId, checkbox.checked);
+      }
+    });
+    
+    checkbox.addEventListener("change", (e) => {
+      toggleTabSelection(tabId, e.target.checked);
+    });
+    
+    // Check if already selected
+    if (selectedTabs.has(tabId)) {
+      checkbox.checked = true;
+      item.classList.add("selected");
+    }
+  });
+  
+  updateTabCount();
+}
+
+function toggleTabSelection(tabId, isSelected) {
+  const item = tabSelectorModal.querySelector(`.quickai-tab-item[data-tab-id="${tabId}"]`);
+  
+  if (isSelected) {
+    selectedTabs.add(tabId);
+    item.classList.add("selected");
+  } else {
+    selectedTabs.delete(tabId);
+    item.classList.remove("selected");
+    // Remove from context if already scraped
+    tabContexts.delete(tabId);
+  }
+  
+  updateTabCount();
+}
+
+function updateTabCount() {
+  const countElement = tabSelectorModal.querySelector(".quickai-tab-count");
+  const confirmBtn = tabSelectorModal.querySelector(".quickai-tab-selector-confirm");
+  
+  const count = selectedTabs.size;
+  countElement.textContent = `${count} tab${count !== 1 ? 's' : ''} selected`;
+  confirmBtn.disabled = count === 0;
+}
+
+function filterTabs() {
+  const searchInput = tabSelectorModal.querySelector(".quickai-tab-search-input");
+  const query = searchInput.value.toLowerCase();
+  const items = tabSelectorModal.querySelectorAll(".quickai-tab-item");
+  
+  items.forEach(item => {
+    const title = item.querySelector(".quickai-tab-title").textContent.toLowerCase();
+    const url = item.querySelector(".quickai-tab-url").textContent.toLowerCase();
+    
+    if (title.includes(query) || url.includes(query)) {
+      item.style.display = "flex";
+    } else {
+      item.style.display = "none";
+    }
+  });
+}
+
+async function confirmTabSelection() {
+  if (selectedTabs.size === 0) return;
+  
+  const confirmBtn = tabSelectorModal.querySelector(".quickai-tab-selector-confirm");
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = "Scraping content...";
+  
+  try {
+    // Request service worker to scrape selected tabs
+    const tabIds = Array.from(selectedTabs);
+    
+    chrome.runtime.sendMessage({
+      type: "scrapeMultipleTabs",
+      tabIds: tabIds
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to scrape tabs:", chrome.runtime.lastError);
+        showScrapeError();
+        return;
+      }
+      
+      if (response && response.results) {
+        // Store scraped content
+        response.results.forEach(result => {
+          if (result.success) {
+            tabContexts.set(result.tabId, result.content);
+          }
+        });
+        
+        // Update UI to show included contexts
+        updateContextIndicators();
+        closeTabSelector();
+      }
+    });
+  } catch (error) {
+    console.error("Error scraping tabs:", error);
+    showScrapeError();
+  }
+}
+
+function updateContextIndicators() {
+  const indicatorsContainer = document.getElementById("quickai-context-indicators");
+  const tabSelectorBtn = document.getElementById("quickai-tab-selector");
+  
+  if (!indicatorsContainer) return;
+  
+  // Clear existing indicators
+  const existingChips = indicatorsContainer.querySelectorAll(".quickai-context-chip");
+  existingChips.forEach(chip => chip.remove());
+  
+  // Update button state
+  if (tabSelectorBtn) {
+    if (tabContexts.size > 0) {
+      tabSelectorBtn.classList.add("has-context");
+      tabSelectorBtn.title = `${tabContexts.size} tab${tabContexts.size > 1 ? 's' : ''} included`;
+    } else {
+      tabSelectorBtn.classList.remove("has-context");
+      tabSelectorBtn.title = "Include tab content";
+    }
+  }
+  
+  // Show/hide container
+  if (tabContexts.size === 0) {
+    indicatorsContainer.style.display = "none";
+    return;
+  }
+  
+  indicatorsContainer.style.display = "flex";
+  
+  // Add chips for each included tab
+  tabContexts.forEach((content, tabId) => {
+    const chip = document.createElement("div");
+    chip.className = "quickai-context-chip active";
+    chip.innerHTML = `
+      <span>${escapeHtml(content.title || 'Tab ' + tabId)}</span>
+      <span class="quickai-context-chip-remove" data-tab-id="${tabId}">&times;</span>
+    `;
+    
+    chip.querySelector(".quickai-context-chip-remove").addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeTabContext(tabId);
+    });
+    
+    indicatorsContainer.appendChild(chip);
+  });
+}
+
+function removeTabContext(tabId) {
+  tabContexts.delete(tabId);
+  selectedTabs.delete(tabId);
+  updateContextIndicators();
+}
+
+function showTabError() {
+  const tabList = tabSelectorModal.querySelector(".quickai-tab-list");
+  tabList.innerHTML = `
+    <div style="text-align: center; padding: 40px; color: #d32f2f;">
+      Failed to load tabs. Please try again.
+    </div>
+  `;
+}
+
+function showScrapeError() {
+  const confirmBtn = tabSelectorModal.querySelector(".quickai-tab-selector-confirm");
+  confirmBtn.disabled = false;
+  confirmBtn.textContent = "Failed - Try Again";
+  
+  setTimeout(() => {
+    confirmBtn.textContent = "Add to Context";
+  }, 2000);
 }

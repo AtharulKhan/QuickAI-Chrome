@@ -12,6 +12,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'scrapeInBackgroundTab') {
         handleBackgroundTabScrape(message, sendResponse);
         return true; // Will respond asynchronously
+    } else if (message.type === 'getTabs') {
+        handleGetTabs(sendResponse);
+        return true; // Will respond asynchronously
+    } else if (message.type === 'scrapeMultipleTabs') {
+        handleScrapeMultipleTabs(message, sendResponse);
+        return true; // Will respond asynchronously
     }
 });
 
@@ -63,6 +69,17 @@ async function handleAIQuery(message, tabId) {
             systemMessage += `\n\nPlease use the full page context to provide more comprehensive and accurate answers. Consider the selected text within the broader context of the entire page.`;
         } else {
             systemMessage += `\n\nPlease provide helpful, relevant, and concise responses based on this context. Focus primarily on the selected text${message.fullContext ? ', but use the surrounding context to better understand the topic' : ''}.`;
+        }
+        
+        // Add tab contexts if available
+        if (message.tabContexts && message.tabContexts.length > 0) {
+            systemMessage += `\n\nAdditional Context from Other Browser Tabs:`;
+            message.tabContexts.forEach((tabContext, index) => {
+                systemMessage += `\n\n--- Tab ${index + 1}: ${tabContext.title} ---`;
+                systemMessage += `\nURL: ${tabContext.url}`;
+                systemMessage += `\nContent:\n${tabContext.content}`;
+            });
+            systemMessage += `\n\nPlease consider the information from these additional tabs to provide a more comprehensive and contextual response. These tabs were specifically selected by the user as relevant to their query.`;
         }
         
 
@@ -748,6 +765,95 @@ function extractPageContent(url) {
             url,
             error: error.message
         };
+    }
+}
+
+// Handle get tabs request
+async function handleGetTabs(sendResponse) {
+    try {
+        const tabs = await chrome.tabs.query({});
+        
+        // Filter out chrome:// and other special URLs
+        const filteredTabs = tabs.filter(tab => {
+            return tab.url && 
+                   !tab.url.startsWith('chrome://') && 
+                   !tab.url.startsWith('chrome-extension://') &&
+                   !tab.url.startsWith('about:') &&
+                   !tab.url.startsWith('edge://');
+        });
+        
+        sendResponse({ 
+            success: true, 
+            tabs: filteredTabs.map(tab => ({
+                id: tab.id,
+                title: tab.title,
+                url: tab.url,
+                favIconUrl: tab.favIconUrl
+            }))
+        });
+    } catch (error) {
+        console.error('Failed to get tabs:', error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+// Handle scrape multiple tabs request
+async function handleScrapeMultipleTabs(message, sendResponse) {
+    const { tabIds } = message;
+    const results = [];
+    
+    try {
+        for (const tabId of tabIds) {
+            try {
+                // Check if tab still exists
+                const tab = await chrome.tabs.get(tabId);
+                
+                // Skip if URL is not accessible
+                if (!tab.url || 
+                    tab.url.startsWith('chrome://') || 
+                    tab.url.startsWith('chrome-extension://')) {
+                    results.push({
+                        tabId,
+                        success: false,
+                        error: 'Cannot access this type of URL'
+                    });
+                    continue;
+                }
+                
+                // Execute content extraction script
+                const injectionResults = await chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: extractPageContent,
+                    args: [tab.url]
+                });
+                
+                if (injectionResults && injectionResults[0] && injectionResults[0].result) {
+                    results.push({
+                        tabId,
+                        success: true,
+                        content: injectionResults[0].result
+                    });
+                } else {
+                    results.push({
+                        tabId,
+                        success: false,
+                        error: 'Failed to extract content'
+                    });
+                }
+            } catch (error) {
+                console.error(`Failed to scrape tab ${tabId}:`, error);
+                results.push({
+                    tabId,
+                    success: false,
+                    error: error.message
+                });
+            }
+        }
+        
+        sendResponse({ success: true, results });
+    } catch (error) {
+        console.error('Failed to scrape tabs:', error);
+        sendResponse({ success: false, error: error.message });
     }
 }
 
