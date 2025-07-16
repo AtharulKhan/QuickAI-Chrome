@@ -18,6 +18,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'scrapeMultipleTabs') {
         handleScrapeMultipleTabs(message, sendResponse);
         return true; // Will respond asynchronously
+    } else if (message.type === 'performGoogleSearch') {
+        handleGoogleSearch(message, sendResponse);
+        return true; // Will respond asynchronously
+    } else if (message.type === 'scrapeGoogleResult') {
+        handleGoogleResultScrape(message, sendResponse);
+        return true; // Will respond asynchronously
+    } else if (message.type === 'queryAIWithGoogle') {
+        handleAIQueryWithGoogle(message, sender.tab.id);
+        return true;
     }
 });
 
@@ -871,3 +880,392 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         });
     }
 });
+
+// Handle Google search
+async function handleGoogleSearch(message, sendResponse) {
+    const { query, url } = message;
+    
+    try {
+        console.log('🔍 Service Worker - Performing Google search for:', query);
+        
+        // Create a new tab with Google search
+        console.log('🔍 Opening Google search URL:', url);
+        const tab = await chrome.tabs.create({
+            url: url,
+            active: false
+        });
+        
+        // Wait for the tab to load
+        await new Promise((resolve) => {
+            const listener = (tabId, changeInfo) => {
+                if (tabId === tab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            
+            // Timeout after 10 seconds
+            setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+            }, 10000);
+        });
+        
+        // Add a small delay to ensure page is fully rendered
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        console.log('🔍 Extracting search results from tab:', tab.id);
+        
+        // Extract search results
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: extractGoogleSearchResults
+        });
+        
+        // Close the tab
+        await chrome.tabs.remove(tab.id);
+        
+        if (results && results[0] && results[0].result) {
+            console.log('✅ Service Worker - Google search extracted successfully');
+            sendResponse({ success: true, results: results[0].result });
+        } else {
+            console.error('❌ Service Worker - Failed to extract Google results');
+            sendResponse({ success: false, error: 'Failed to extract search results' });
+        }
+        
+    } catch (error) {
+        console.error('❌ Service Worker - Error in Google search:', error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+// Function to extract Google search results
+function extractGoogleSearchResults() {
+    try {
+        console.log('🔍 Extracting from URL:', window.location.href);
+        console.log('🔍 Page title:', document.title);
+        
+        const results = [];
+        
+        // Multiple possible selectors for Google search results
+        const resultSelectors = [
+            'div.g',
+            'div[data-sokoban-container]',
+            'div.tF2Cxc',
+            'div.kvH3mc',
+            'div[jscontroller][jsaction][jsname][data-hveid]'
+        ];
+        
+        let resultElements = [];
+        for (const selector of resultSelectors) {
+            resultElements = document.querySelectorAll(selector);
+            console.log(`🔍 Selector "${selector}" found:`, resultElements.length, 'elements');
+            if (resultElements.length > 0) break;
+        }
+        
+        // If still no results, try to find any links with h3
+        if (resultElements.length === 0) {
+            console.log('🔍 Fallback: Looking for any h3 with links');
+            const h3Elements = document.querySelectorAll('h3');
+            resultElements = Array.from(h3Elements).map(h3 => h3.closest('div')).filter(Boolean);
+        }
+        
+        console.log('🔍 Total search result elements found:', resultElements.length);
+        
+        resultElements.forEach((element, index) => {
+            if (index >= 10) return; // Limit to 10 results
+            
+            // Try multiple selectors for links
+            const linkSelectors = [
+                'a[href][data-ved]',
+                'a[href][jsname]',
+                'h3 a[href]',
+                'a[href] h3',
+                'a[ping]',
+                'div[data-hveid] a[href]',
+                'a[href]:not([href*="google.com"])'
+            ];
+            let linkElement = null;
+            let url = null;
+            
+            for (const selector of linkSelectors) {
+                linkElement = element.querySelector(selector);
+                if (linkElement) {
+                    url = linkElement.href || linkElement.parentElement?.href;
+                    if (url && !url.includes('google.com')) break;
+                }
+            }
+            
+            // If still no URL, try to find any anchor tag
+            if (!url) {
+                const anyLink = element.querySelector('a[href]');
+                if (anyLink && anyLink.href && !anyLink.href.includes('google.com')) {
+                    url = anyLink.href;
+                }
+            }
+            
+            // Extract title - try multiple selectors
+            const titleSelectors = ['h3', 'h3.LC20lb', 'h3.r', 'div[role="heading"]'];
+            let title = '';
+            for (const selector of titleSelectors) {
+                const titleElement = element.querySelector(selector);
+                if (titleElement?.textContent) {
+                    title = titleElement.textContent;
+                    break;
+                }
+            }
+            
+            // Extract snippet - try multiple selectors
+            const snippetSelectors = [
+                'div.VwiC3b',
+                'span.aCOpRe',
+                'div[data-content-feature="1"]',
+                'div.IsZvec',
+                'span.st'
+            ];
+            let snippet = '';
+            for (const selector of snippetSelectors) {
+                const snippetElement = element.querySelector(selector);
+                if (snippetElement?.textContent) {
+                    snippet = snippetElement.textContent;
+                    break;
+                }
+            }
+            
+            if (url && title && !url.includes('google.com') && !url.includes('googleusercontent.com')) {
+                results.push({
+                    url: url,
+                    title: title.trim(),
+                    snippet: snippet.trim()
+                });
+                console.log('Added result:', title, url);
+            }
+        });
+        
+        console.log('Total results extracted:', results.length);
+        
+        // If no results found with structured extraction, fallback to extracting all links
+        if (results.length === 0) {
+            console.log('🔍 Fallback: Extracting all non-Google links from page');
+            const allLinks = document.querySelectorAll('a[href]');
+            const uniqueUrls = new Set();
+            
+            allLinks.forEach(link => {
+                const url = link.href;
+                const text = link.textContent?.trim() || '';
+                
+                // Filter out Google URLs, anchors, and javascript
+                if (url && 
+                    !url.includes('google.com') && 
+                    !url.includes('googleapis.com') &&
+                    !url.startsWith('javascript:') &&
+                    !url.startsWith('#') &&
+                    url.startsWith('http') &&
+                    text.length > 10 &&
+                    !uniqueUrls.has(url)) {
+                    
+                    uniqueUrls.add(url);
+                    results.push({
+                        url: url,
+                        title: text.substring(0, 100),
+                        snippet: ''
+                    });
+                    
+                    if (results.length >= 10) return;
+                }
+            });
+            
+            console.log('🔍 Fallback extracted:', results.length, 'links');
+        }
+        
+        return results;
+    } catch (error) {
+        console.error('Error extracting Google results:', error);
+        return [];
+    }
+}
+
+// Handle Google result scraping
+async function handleGoogleResultScrape(message, sendResponse) {
+    const { url, index } = message;
+    
+    try {
+        console.log(`📋 Service Worker - Scraping Google result ${index}:`, url);
+        
+        // Create a new tab in the background
+        const tab = await chrome.tabs.create({
+            url: url,
+            active: false
+        });
+        
+        // Wait for the tab to load
+        await new Promise((resolve) => {
+            const listener = (tabId, changeInfo) => {
+                if (tabId === tab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            
+            // Timeout after 8 seconds
+            setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+            }, 8000);
+        });
+        
+        // Extract content
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: extractPageContent,
+            args: [url]
+        });
+        
+        // Close the tab
+        await chrome.tabs.remove(tab.id);
+        
+        if (results && results[0] && results[0].result) {
+            console.log(`✅ Service Worker - Content extracted successfully for result ${index}`);
+            sendResponse({ success: true, content: results[0].result });
+        } else {
+            console.error(`❌ Service Worker - Failed to extract content for result ${index}`);
+            sendResponse({ success: false, error: 'Failed to extract content' });
+        }
+        
+    } catch (error) {
+        console.error(`❌ Service Worker - Error scraping result ${index}:`, error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+// Handle AI query with Google search context
+async function handleAIQueryWithGoogle(message, tabId) {
+    try {
+        // Get API key from storage
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            chrome.tabs.sendMessage(tabId, {
+                type: 'streamError',
+                error: 'API key not configured. Please set your OpenRouter API key in the extension options.',
+                messageId: message.messageId
+            });
+            return;
+        }
+
+        // Notify start of streaming
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId: message.messageId 
+        });
+
+        // Build system message with Google search context
+        let systemMessage = `You are a helpful AI assistant. The user performed a Google search for: "${message.searchQuery}".`;
+        
+        // Add Google search results context
+        if (message.googleContext && message.googleContext.length > 0) {
+            systemMessage += `\n\nI have scraped content from ${message.googleContext.length} Google search results. Here is the content from each page:\n`;
+            
+            message.googleContext.forEach((result, index) => {
+                systemMessage += `\n\n--- Result ${index + 1}: ${result.title} ---`;
+                systemMessage += `\nURL: ${result.url}`;
+                systemMessage += `\nContent:\n${result.content}`;
+            });
+            
+            systemMessage += `\n\nPlease use this information from the Google search results to provide a comprehensive and accurate response to the user's query. The user searched for "${message.searchQuery}" and now wants to know: "${message.prompt}"`;
+        } else {
+            systemMessage += `\n\nUnfortunately, I couldn't scrape content from the search results, but the user searched for "${message.searchQuery}" and now wants to know: "${message.prompt}". Please provide the best answer you can based on your knowledge.`;
+        }
+
+        // Make API request
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/QuickAI',
+                'X-Title': 'QuickAI Chrome Extension'
+            },
+            body: JSON.stringify({
+                model: message.model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: systemMessage
+                    },
+                    {
+                        role: 'user',
+                        content: message.prompt
+                    }
+                ],
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 2000
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`API Error: ${response.status} - ${error}`);
+        }
+
+        // Process streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') {
+                        break;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content || '';
+                        
+                        if (content) {
+                            fullResponse += content;
+                            const formattedContent = formatMarkdown(content);
+                            chrome.tabs.sendMessage(tabId, {
+                                type: 'streamChunk',
+                                content: formattedContent,
+                                rawContent: content,
+                                messageId: message.messageId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing stream data:', e);
+                    }
+                }
+            }
+        }
+
+        // Notify completion
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId: message.messageId 
+        });
+
+    } catch (error) {
+        console.error('QuickAI Google Error:', error);
+        chrome.tabs.sendMessage(tabId, {
+            type: 'streamError',
+            error: error.message,
+            messageId: message.messageId
+        });
+    }
+}

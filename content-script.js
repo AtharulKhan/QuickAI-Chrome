@@ -1,5 +1,6 @@
 let activeUI = null;
 let floatingButton = null;
+let googleButton = null;
 let selectedText = "";
 let selectionRect = null;
 let fullContext = null;
@@ -9,6 +10,8 @@ let editableElement = null; // Store reference to editable element
 let hoveredLink = null; // Track currently hovered link
 let linkHoverTimeout = null; // Timeout for link hover delay
 let currentLinkUrl = null; // Store current link URL
+let googleSearchResults = []; // Store Google search results
+let googleScrapedContent = new Map(); // Store scraped content from Google results
 
 console.log("QuickAI content script loaded on:", window.location.href);
 
@@ -363,6 +366,7 @@ document.addEventListener("selectionchange", () => {
 function showFloatingButton(type = 'text', rect = null, data = null) {
   if (floatingButton) return;
 
+  // Create QuickAI button
   floatingButton = document.createElement("button");
   floatingButton.id = "quickai-trigger-button";
   floatingButton.className = type === 'link' ? 'quickai-link-button' : '';
@@ -392,6 +396,28 @@ function showFloatingButton(type = 'text', rect = null, data = null) {
   });
 
   document.body.appendChild(floatingButton);
+
+  // Only show Google button for text selection
+  if (type === 'text') {
+    googleButton = document.createElement("button");
+    googleButton.id = "quickai-google-button";
+    googleButton.innerHTML = "G";
+    googleButton.title = "Search on Google";
+
+    // Position Google button next to QuickAI button
+    googleButton.style.top = `${top}px`;
+    googleButton.style.left = `${left + 30}px`; // 30px to the right
+
+    // Add click handler for Google search
+    googleButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideFloatingButton();
+      initiateGoogleSearch(targetRect, selectedText);
+    });
+
+    document.body.appendChild(googleButton);
+  }
 }
 
 // Hide floating button
@@ -399,6 +425,10 @@ function hideFloatingButton() {
   if (floatingButton) {
     floatingButton.remove();
     floatingButton = null;
+  }
+  if (googleButton) {
+    googleButton.remove();
+    googleButton = null;
   }
 }
 
@@ -1725,12 +1755,23 @@ async function getModels() {
 
     // Extract the models array using a safe method
     // This looks for the models array definition and parses it
-    const match = text.match(/const\s+models\s*=\s*(\[[\s\S]*?\]);/);
+    const match = text.match(/const\s+models\s*=\s*(\[[\s\S]*?\]);/m);
 
     if (match && match[1]) {
       try {
         // Parse JSON safely without eval
-        const jsonString = match[1].replace(/'/g, '"').replace(/(\w+):/g, '"$1":');
+        // First, remove comments
+        let cleanedString = match[1]
+          .replace(/\/\/.*$/gm, '') // Remove single-line comments
+          .replace(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments
+        
+        // Then convert to proper JSON
+        const jsonString = cleanedString
+          .replace(/'/g, '"')
+          .replace(/(\w+):/g, '"$1":')
+          .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
+          .replace(/,\s*}/g, '}'); // Remove trailing commas in objects
+        
         const modelsArray = JSON.parse(jsonString);
         console.log("Loaded", modelsArray.length, "models from models.js");
         return modelsArray;
@@ -2290,4 +2331,299 @@ function showScrapeError() {
   setTimeout(() => {
     confirmBtn.textContent = "Add to Context";
   }, 2000);
+}
+
+// Google Search functionality
+async function initiateGoogleSearch(rect, searchQuery) {
+  try {
+    // Create UI for Google search
+    createGoogleSearchUI(rect, searchQuery);
+    
+    // Clear previous results
+    googleSearchResults = [];
+    googleScrapedContent.clear();
+    
+    // Open Google search in new tab
+    const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+    
+    // Request service worker to handle Google search
+    chrome.runtime.sendMessage({
+      type: "performGoogleSearch",
+      query: searchQuery,
+      url: googleUrl
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to perform Google search:", chrome.runtime.lastError);
+        updateGoogleSearchError("Failed to perform search");
+        return;
+      }
+      
+      if (response && response.results) {
+        googleSearchResults = response.results;
+        startScrapingGoogleResults();
+      } else {
+        updateGoogleSearchError("No results found");
+      }
+    });
+  } catch (error) {
+    console.error("Error initiating Google search:", error);
+    updateGoogleSearchError("Search failed");
+  }
+}
+
+// Create Google search UI
+function createGoogleSearchUI(rect, searchQuery) {
+  if (activeUI) activeUI.remove();
+
+  const container = document.createElement("div");
+  container.id = "quickai-container";
+  container.className = "quickai-container";
+  
+  // Store search query
+  container.dataset.googleQuery = searchQuery;
+  container.dataset.isGoogleSearch = "true";
+  
+  // Position near selected text
+  const top = window.scrollY + rect.bottom + 10;
+  const left = window.scrollX + rect.left;
+
+  container.style.top = `${top}px`;
+  container.style.left = `${left}px`;
+
+  container.innerHTML = `
+    <div class="quickai-gradient-border"></div>
+    <div class="quickai-content">
+      <div class="quickai-header">
+        <span class="quickai-title">QuickAI - Google Search</span>
+        <div class="quickai-header-buttons">
+          <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
+          <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
+          <button id="quickai-close" class="quickai-close">&times;</button>
+        </div>
+      </div>
+      <div class="quickai-context">
+        <strong>Search Query:</strong> <span class="quickai-context-text">${escapeHtml(searchQuery.substring(0, 100))}${searchQuery.length > 100 ? "..." : ""}</span>
+      </div>
+      <div id="quickai-google-progress" class="quickai-google-progress">
+        <div class="quickai-google-progress-header">
+          <div class="quickai-google-icon">G</div>
+          <div class="quickai-google-progress-title">Searching Google...</div>
+        </div>
+        <div class="quickai-google-progress-status">Opening Google search and extracting results...</div>
+        <div class="quickai-google-progress-bar">
+          <div class="quickai-google-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="quickai-google-results-list" id="quickai-google-results"></div>
+      </div>
+      <div id="quickai-conversation" class="quickai-conversation"></div>
+      <div class="quickai-input-area">
+        <div class="quickai-textarea-wrapper">
+          <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Add your question about the search results..." rows="3"></textarea>
+          <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 13V15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="quickai-controls">
+          <select id="quickai-model" class="quickai-model-select">
+            <!-- Models will be loaded dynamically -->
+          </select>
+          <button id="quickai-submit" class="quickai-submit" disabled>Submit</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+  activeUI = container;
+
+  // Add event listeners
+  document.getElementById("quickai-close").addEventListener("click", closeUI);
+  document.getElementById("quickai-clear").addEventListener("click", clearConversation);
+  document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
+  document.getElementById("quickai-submit").addEventListener("click", () => submitGoogleQuery());
+  document.getElementById("quickai-prompt").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.ctrlKey) {
+      submitGoogleQuery();
+    }
+  });
+
+  // Add voice button listener
+  document.getElementById("quickai-voice").addEventListener("click", () => {
+    startVoiceRecognition();
+  });
+
+  // Load models
+  loadModelsForGoogleSearch();
+}
+
+// Load models for Google search UI
+async function loadModelsForGoogleSearch() {
+  const models = await getModels();
+  const modelSelect = document.getElementById("quickai-model");
+  
+  let lastModel = null;
+  try {
+    const result = await chrome.storage.sync.get("lastModel");
+    lastModel = result.lastModel;
+  } catch (error) {
+    console.warn("Could not access chrome.storage:", error);
+  }
+  
+  const defaultModel = lastModel || models[0]?.id || "google/gemini-2.5-flash";
+  
+  modelSelect.innerHTML = models
+    .map(m => `<option value="${m.id}" ${m.id === defaultModel ? "selected" : ""}>${m.name}</option>`)
+    .join("");
+    
+  // Save model selection
+  modelSelect.addEventListener("change", (e) => {
+    try {
+      chrome.storage.sync.set({ lastModel: e.target.value });
+    } catch (error) {
+      console.warn("Could not save model selection:", error);
+    }
+  });
+}
+
+// Start scraping Google results
+async function startScrapingGoogleResults() {
+  const progressStatus = document.querySelector(".quickai-google-progress-status");
+  const progressBar = document.querySelector(".quickai-google-progress-fill");
+  const resultsList = document.getElementById("quickai-google-results");
+  
+  if (!googleSearchResults.length) {
+    updateGoogleSearchError("No search results to scrape");
+    return;
+  }
+  
+  progressStatus.textContent = `Found ${googleSearchResults.length} results. Starting to scrape content...`;
+  
+  // Display results list
+  resultsList.innerHTML = googleSearchResults.map((result, index) => `
+    <div class="quickai-google-result-item" data-index="${index}">
+      <div class="quickai-google-result-status pending" id="google-result-${index}"></div>
+      <div class="quickai-google-result-title">${escapeHtml(result.title)}</div>
+    </div>
+  `).join('');
+  
+  // Scrape each result
+  let completed = 0;
+  for (let i = 0; i < googleSearchResults.length; i++) {
+    const result = googleSearchResults[i];
+    const statusElement = document.getElementById(`google-result-${i}`);
+    
+    // Update status to loading
+    statusElement.className = "quickai-google-result-status loading";
+    
+    try {
+      // Request scraping from service worker
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: "scrapeGoogleResult",
+          url: result.url,
+          index: i
+        }, resolve);
+      });
+      
+      if (response && response.success) {
+        googleScrapedContent.set(result.url, response.content);
+        statusElement.className = "quickai-google-result-status success";
+      } else {
+        statusElement.className = "quickai-google-result-status error";
+      }
+    } catch (error) {
+      console.error(`Failed to scrape ${result.url}:`, error);
+      statusElement.className = "quickai-google-result-status error";
+    }
+    
+    completed++;
+    const progress = (completed / googleSearchResults.length) * 100;
+    progressBar.style.width = `${progress}%`;
+    progressStatus.textContent = `Scraped ${completed} of ${googleSearchResults.length} results...`;
+  }
+  
+  // Enable submit button
+  const submitBtn = document.getElementById("quickai-submit");
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    progressStatus.textContent = `Completed! Scraped ${googleScrapedContent.size} of ${googleSearchResults.length} results.`;
+  }
+}
+
+// Submit Google query with scraped content
+async function submitGoogleQuery() {
+  const prompt = document.getElementById("quickai-prompt").value.trim();
+  if (!prompt) return;
+  
+  const model = document.getElementById("quickai-model").value;
+  const conversationArea = document.getElementById("quickai-conversation");
+  const submitBtn = document.getElementById("quickai-submit");
+  const promptInput = document.getElementById("quickai-prompt");
+  const searchQuery = document.getElementById("quickai-container").dataset.googleQuery;
+
+  // Add user message to conversation
+  const userMessage = document.createElement("div");
+  userMessage.className = "quickai-message quickai-user-message";
+  userMessage.innerHTML = `<div class="quickai-message-content">${escapeHtml(prompt)}</div>`;
+  conversationArea.appendChild(userMessage);
+
+  // Clear input
+  promptInput.value = "";
+
+  // Add AI message container with loading state
+  const aiMessage = document.createElement("div");
+  aiMessage.className = "quickai-message quickai-ai-message";
+  aiMessage.id = `ai-message-${Date.now()}`;
+  aiMessage.innerHTML = '<div class="quickai-message-content"><div class="quickai-loader"></div></div>';
+  conversationArea.appendChild(aiMessage);
+
+  // Scroll to bottom
+  conversationArea.scrollTop = conversationArea.scrollHeight;
+
+  // Store message ID for streaming updates
+  const currentMessageId = aiMessage.id;
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Processing...";
+
+  // Prepare Google search context
+  const googleContext = Array.from(googleScrapedContent.entries()).map(([url, content]) => ({
+    url,
+    title: content.title,
+    content: content.content
+  }));
+
+  try {
+    chrome.runtime.sendMessage({
+      type: "queryAIWithGoogle",
+      searchQuery: searchQuery,
+      googleContext: googleContext,
+      prompt: prompt,
+      model: model,
+      messageId: currentMessageId
+    });
+  } catch (error) {
+    console.error("Failed to send message to service worker:", error);
+    const messageContent = aiMessage.querySelector(".quickai-message-content");
+    if (messageContent) {
+      messageContent.innerHTML = '<div class="quickai-error">Failed to connect to QuickAI service. Please refresh the page and try again.</div>';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit";
+    }
+  }
+}
+
+// Update Google search error
+function updateGoogleSearchError(errorMessage) {
+  const progressStatus = document.querySelector(".quickai-google-progress-status");
+  if (progressStatus) {
+    progressStatus.textContent = errorMessage;
+    progressStatus.style.color = "#d32f2f";
+  }
 }
