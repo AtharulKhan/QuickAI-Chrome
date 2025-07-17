@@ -27,6 +27,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'queryAIWithGoogle') {
         handleAIQueryWithGoogle(message, sender.tab.id);
         return true;
+    } else if (message.type === 'captureScreenshot') {
+        handleScreenshotCapture(sender.tab.id, sendResponse);
+        return true; // Will respond asynchronously
+    } else if (message.type === 'queryAIWithScreenshot') {
+        handleAIQueryWithScreenshot(message, sender.tab.id);
+        return true;
     }
 });
 
@@ -1262,6 +1268,328 @@ async function handleAIQueryWithGoogle(message, tabId) {
 
     } catch (error) {
         console.error('QuickAI Google Error:', error);
+        chrome.tabs.sendMessage(tabId, {
+            type: 'streamError',
+            error: error.message,
+            messageId: message.messageId
+        });
+    }
+}
+
+// Handle screenshot capture
+async function handleScreenshotCapture(tabId, sendResponse) {
+    try {
+        // Get page dimensions using scripting API
+        const [dimensions] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: () => {
+                return {
+                    scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+                    scrollHeight: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+                    clientWidth: document.documentElement.clientWidth,
+                    clientHeight: document.documentElement.clientHeight,
+                    viewportWidth: window.innerWidth,
+                    viewportHeight: window.innerHeight,
+                    devicePixelRatio: window.devicePixelRatio || 1
+                };
+            }
+        });
+
+        const pageInfo = dimensions.result;
+        
+        // If page fits in viewport, just capture once
+        if (pageInfo.scrollHeight <= pageInfo.viewportHeight && 
+            pageInfo.scrollWidth <= pageInfo.viewportWidth) {
+            const screenshot = await chrome.tabs.captureVisibleTab(null, {
+                format: 'png',
+                quality: 90
+            });
+            sendResponse({ screenshot: screenshot });
+            return;
+        }
+
+        // Store original scroll position
+        const [originalScroll] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: () => ({ x: window.scrollX, y: window.scrollY })
+        });
+
+        // Calculate scroll positions needed
+        const scrollPositions = [];
+        const viewportHeight = pageInfo.viewportHeight;
+        const totalHeight = pageInfo.scrollHeight;
+        
+        for (let y = 0; y < totalHeight; y += viewportHeight) {
+            scrollPositions.push({
+                x: 0,
+                y: y,
+                height: Math.min(viewportHeight, totalHeight - y)
+            });
+        }
+
+        // Capture screenshots with rate limiting
+        const screenshots = [];
+        for (let i = 0; i < scrollPositions.length; i++) {
+            const pos = scrollPositions[i];
+            
+            // Scroll to position
+            await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: (x, y) => window.scrollTo(x, y),
+                args: [pos.x, pos.y]
+            });
+            
+            // Wait for scroll and rendering (and to avoid rate limiting)
+            await new Promise(resolve => setTimeout(resolve, 600)); // 600ms ensures we stay under 2 calls/second
+            
+            // Capture visible area
+            const screenshot = await chrome.tabs.captureVisibleTab(null, {
+                format: 'png',
+                quality: 90
+            });
+            
+            screenshots.push({
+                dataUrl: screenshot,
+                x: pos.x,
+                y: pos.y,
+                height: pos.height
+            });
+        }
+
+        // Restore original scroll position
+        await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: (x, y) => window.scrollTo(x, y),
+            args: [originalScroll.result.x, originalScroll.result.y]
+        });
+
+        // Send screenshots to content script for stitching
+        const [stitchedResult] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: stitchScreenshots,
+            args: [screenshots, pageInfo]
+        });
+
+        if (stitchedResult.result.error) {
+            throw new Error(stitchedResult.result.error);
+        }
+
+        sendResponse({ screenshot: stitchedResult.result.dataUrl || stitchedResult.result });
+        
+    } catch (error) {
+        console.error('Screenshot capture error:', error);
+        // Fallback to simple visible area capture
+        try {
+            const screenshot = await chrome.tabs.captureVisibleTab(null, {
+                format: 'png',
+                quality: 90
+            });
+            sendResponse({ 
+                screenshot: screenshot,
+                error: 'Could not capture full page. Showing visible area only.'
+            });
+        } catch (fallbackError) {
+            sendResponse({ error: fallbackError.message });
+        }
+    }
+}
+
+// Function to be injected for stitching screenshots
+async function stitchScreenshots(screenshots, pageInfo) {
+    try {
+        // Create canvas for full page
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = pageInfo.scrollWidth;
+        canvas.height = pageInfo.scrollHeight;
+        
+        // Clear canvas with white background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Load and draw all images
+        for (const screenshot of screenshots) {
+            await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    // Draw image at correct position
+                    ctx.drawImage(img, screenshot.x, screenshot.y);
+                    resolve();
+                };
+                img.onerror = () => reject(new Error('Failed to load screenshot image'));
+                img.src = screenshot.dataUrl;
+            });
+        }
+        
+        // Compress image to ensure it's not too large
+        let quality = 0.8;
+        let fullPageDataUrl = canvas.toDataURL('image/jpeg', quality);
+        
+        // If image is too large (> 1MB), compress more
+        while (fullPageDataUrl.length > 1024 * 1024 && quality > 0.1) {
+            quality -= 0.1;
+            fullPageDataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+        
+        console.log('Final image quality:', quality, 'Size:', fullPageDataUrl.length);
+        return { dataUrl: fullPageDataUrl };
+        
+    } catch (error) {
+        return { error: 'Failed to stitch screenshots: ' + error.message };
+    }
+}
+
+// Handle AI query with screenshot
+async function handleAIQueryWithScreenshot(message, tabId) {
+    console.log('Handling AI query with screenshot, messageId:', message.messageId);
+    try {
+        // Get API key from storage
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            chrome.tabs.sendMessage(tabId, {
+                type: 'streamError',
+                error: 'API key not configured. Please set your OpenRouter API key in the extension options.',
+                messageId: message.messageId
+            });
+            return;
+        }
+        
+        // Add a note about vision support
+        console.log('Note: Make sure the selected model supports vision/images. Not all models do.');
+
+        // Notify start of streaming
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId: message.messageId 
+        });
+
+        // Build messages array with screenshot
+        const messages = [
+            {
+                role: 'user',
+                content: [
+                    {
+                        type: 'text',
+                        text: message.contextText ? 
+                            `Context: The user selected this text on the page: "${message.contextText}"\n\n${message.prompt}` : 
+                            message.prompt
+                    },
+                    {
+                        type: 'image_url',
+                        image_url: {
+                            url: message.screenshot
+                        }
+                    }
+                ]
+            }
+        ];
+
+        console.log('Sending request to OpenRouter with model:', message.model);
+        console.log('Screenshot data length:', message.screenshot.length);
+        console.log('Screenshot data prefix:', message.screenshot.substring(0, 50));
+        console.log('Messages array:', JSON.stringify(messages[0].content.map(c => ({
+            type: c.type,
+            ...(c.type === 'text' ? { text: c.text.substring(0, 50) + '...' } : { image_url: { url: c.image_url.url.substring(0, 50) + '...' } })
+        }))));
+        
+        // Check if model is known to support vision
+        const visionModels = ['gpt-4-vision', 'gpt-4o', 'claude-3', 'gemini-pro-vision'];
+        const modelSupportsVision = visionModels.some(vm => message.model.toLowerCase().includes(vm.toLowerCase()));
+        if (!modelSupportsVision) {
+            console.warn(`Model ${message.model} may not support vision. Consider using a vision-enabled model.`);
+        }
+        
+        // Log the full request body size
+        const requestBody = JSON.stringify({
+            model: message.model,
+            messages: messages,
+            stream: true,
+            temperature: 0.7,
+            max_tokens: 2000
+        });
+        console.log('Request body size:', requestBody.length);
+        
+        // Validate screenshot data
+        if (!message.screenshot.startsWith('data:image/')) {
+            console.error('Invalid screenshot data format');
+            throw new Error('Screenshot data must be a valid data URL');
+        }
+        
+        // Make API request
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/QuickAI',
+                'X-Title': 'QuickAI Chrome Extension'
+            },
+            body: requestBody
+        });
+
+        console.log('OpenRouter response status:', response.status);
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('API error response:', errorText);
+            
+            // Check if it's a model capability issue
+            if (errorText.includes('vision') || errorText.includes('image')) {
+                throw new Error(`This model may not support images. Error: ${errorText}`);
+            }
+            
+            throw new Error(`API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        // Process streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content;
+                        
+                        if (content) {
+                            chrome.tabs.sendMessage(tabId, {
+                                type: 'streamChunk',
+                                content: content,
+                                rawContent: content,
+                                messageId: message.messageId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing stream data:', e);
+                    }
+                }
+            }
+        }
+
+        // Notify completion
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId: message.messageId 
+        });
+
+    } catch (error) {
+        console.error('QuickAI Screenshot Error:', error);
         chrome.tabs.sendMessage(tabId, {
             type: 'streamError',
             error: error.message,

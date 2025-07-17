@@ -1,6 +1,7 @@
 let activeUI = null;
 let floatingButton = null;
 let googleButton = null;
+let screenshotButton = null;
 let selectedText = "";
 let selectionRect = null;
 let fullContext = null;
@@ -417,6 +418,26 @@ function showFloatingButton(type = 'text', rect = null, data = null) {
     });
 
     document.body.appendChild(googleButton);
+
+    // Add screenshot button
+    screenshotButton = document.createElement("button");
+    screenshotButton.id = "quickai-screenshot-button";
+    screenshotButton.innerHTML = "i";
+    screenshotButton.title = "Take screenshot and analyze";
+
+    // Position screenshot button next to Google button
+    screenshotButton.style.top = `${top}px`;
+    screenshotButton.style.left = `${left + 60}px`; // 60px to the right
+
+    // Add click handler for screenshot
+    screenshotButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideFloatingButton();
+      initiateScreenshotCapture(targetRect, selectedText);
+    });
+
+    document.body.appendChild(screenshotButton);
   }
 }
 
@@ -429,6 +450,10 @@ function hideFloatingButton() {
   if (googleButton) {
     googleButton.remove();
     googleButton = null;
+  }
+  if (screenshotButton) {
+    screenshotButton.remove();
+    screenshotButton = null;
   }
 }
 
@@ -1544,7 +1569,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = "Submit";
+        submitBtn.textContent = submitBtn.dataset.originalText || "Send";
       }
       
       // Re-enable quick action buttons
@@ -3050,3 +3075,313 @@ window.debugQuickAITemplates = async function() {
     return [];
   }
 };
+
+// Screenshot functionality
+async function initiateScreenshotCapture(rect, contextText) {
+  try {
+    // Show loading indicator
+    const loadingDiv = document.createElement("div");
+    loadingDiv.id = "quickai-screenshot-loading";
+    loadingDiv.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px 30px;
+      border-radius: 8px;
+      z-index: 2147483647;
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    `;
+    loadingDiv.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="quickai-loading-spinner" style="
+          width: 24px;
+          height: 24px;
+          border: 3px solid rgba(255, 255, 255, 0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: quickai-spin 1s linear infinite;
+        "></div>
+        <span>Capturing full page screenshot...</span>
+      </div>
+    `;
+    document.body.appendChild(loadingDiv);
+    
+    // Add spinner animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes quickai-spin {
+        to { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    // Request screenshot from service worker
+    chrome.runtime.sendMessage({
+      type: "captureScreenshot"
+    }, (response) => {
+      // Remove loading indicator
+      loadingDiv.remove();
+      style.remove();
+      
+      if (chrome.runtime.lastError) {
+        console.error("Failed to capture screenshot:", chrome.runtime.lastError);
+        alert("Failed to capture screenshot: " + chrome.runtime.lastError.message);
+        return;
+      }
+      
+      if (response.error && !response.screenshot) {
+        console.error("Screenshot error:", response.error);
+        alert("Failed to capture screenshot: " + response.error);
+        return;
+      }
+      
+      if (response.screenshot) {
+        console.log("Screenshot received, length:", response.screenshot.length);
+        console.log("Screenshot prefix:", response.screenshot.substring(0, 50));
+        // Create UI for screenshot preview and prompt
+        createScreenshotUI(rect, response.screenshot, contextText, response.error);
+      }
+    });
+  } catch (error) {
+    console.error("Error initiating screenshot capture:", error);
+    alert("Failed to capture screenshot");
+  }
+}
+
+// Create UI for screenshot preview and prompt
+async function createScreenshotUI(rect, screenshotData, contextText, fallbackError = null) {
+  try {
+    if (activeUI) activeUI.remove();
+
+    const container = document.createElement("div");
+    container.id = "quickai-container";
+    container.className = "quickai-container";
+    
+    // Store screenshot data on the container
+    container.dataset.screenshotData = screenshotData;
+    container.dataset.contextText = contextText || "";
+    container.dataset.isScreenshot = "true";
+
+    // Position near selected text
+    const top = window.scrollY + rect.bottom + 10;
+    const left = window.scrollX + rect.left;
+
+    container.style.top = `${top}px`;
+    container.style.left = `${left}px`;
+
+    // Load available models and last selected model
+    const models = await getModels();
+    let lastModel = null;
+    try {
+      const result = await chrome.storage.sync.get("lastModel");
+      lastModel = result.lastModel;
+    } catch (error) {
+      console.warn("Could not access chrome.storage:", error);
+    }
+    const defaultModel = lastModel || models[0]?.id || "google/gemini-2.5-flash";
+    
+    // Determine title based on whether it's a full page or fallback
+    const screenshotTitle = fallbackError ? "QuickAI Screenshot (Visible Area)" : "QuickAI Screenshot (Full Page)";
+
+    container.innerHTML = `
+      <div class="quickai-gradient-border"></div>
+      <div class="quickai-content">
+        <div class="quickai-header">
+          <span class="quickai-title">${screenshotTitle}</span>
+          <div class="quickai-header-buttons">
+            <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
+            <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
+            <button id="quickai-close" class="quickai-close">&times;</button>
+          </div>
+        </div>
+        ${contextText ? `
+        <div class="quickai-context">
+          <strong>Context:</strong> <span class="quickai-context-text">${escapeHtml(
+            contextText.substring(0, 100)
+          )}${contextText.length > 100 ? "..." : ""}</span>
+        </div>
+        ` : ''}
+        <div class="quickai-screenshot-preview">
+          <img src="${screenshotData}" alt="Screenshot preview" style="max-width: 100%; height: auto; max-height: 200px; object-fit: contain;">
+        </div>
+        <div id="quickai-conversation" class="quickai-conversation"></div>
+        <div class="quickai-input-area">
+          <div class="quickai-textarea-wrapper">
+            <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask about this screenshot..." rows="3"></textarea>
+            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8 13V15M6 15H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <div class="quickai-submit-area">
+            <select id="quickai-model-select" class="quickai-model-select">
+              ${models.map(model => 
+                `<option value="${model.id}" ${model.id === defaultModel ? 'selected' : ''}>${model.name}</option>`
+              ).join('')}
+            </select>
+            <button id="quickai-submit" class="quickai-submit">Send</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+    activeUI = container;
+
+    // Set up event handlers
+    document.getElementById("quickai-close").addEventListener("click", closeUI);
+    document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
+    document.getElementById("quickai-clear").addEventListener("click", clearConversation);
+    document.getElementById("quickai-submit").addEventListener("click", handleScreenshotSubmit);
+    
+    const promptTextarea = document.getElementById("quickai-prompt");
+    const modelSelect = document.getElementById("quickai-model-select");
+    
+    // Save selected model
+    modelSelect.addEventListener("change", async () => {
+      const selectedModel = modelSelect.value;
+      try {
+        await chrome.storage.sync.set({ lastModel: selectedModel });
+      } catch (error) {
+        console.warn("Could not save model preference:", error);
+      }
+    });
+
+    // Submit handler for Enter key
+    promptTextarea.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleScreenshotSubmit();
+      }
+    });
+
+    // Initialize voice input
+    initializeVoiceInput();
+
+    // Focus on prompt
+    promptTextarea.focus();
+  } catch (error) {
+    console.error("Error creating screenshot UI:", error);
+  }
+}
+
+// Handle screenshot submit
+async function handleScreenshotSubmit() {
+  const container = document.getElementById("quickai-container");
+  if (!container) return;
+  
+  const promptTextarea = container.querySelector("#quickai-prompt");
+  const prompt = promptTextarea.value.trim();
+  
+  if (!prompt) {
+    promptTextarea.focus();
+    return;
+  }
+  
+  const submitBtn = container.querySelector("#quickai-submit");
+  const modelSelect = container.querySelector("#quickai-model-select");
+  const conversationArea = container.querySelector("#quickai-conversation");
+  const screenshotData = container.dataset.screenshotData;
+  const contextText = container.dataset.contextText;
+  
+  console.log("Screenshot data from container:", screenshotData ? screenshotData.substring(0, 50) + "..." : "null");
+  
+  if (!screenshotData) {
+    alert("Screenshot data is missing. Please try again.");
+    return;
+  }
+  
+  // Disable inputs during processing
+  promptTextarea.disabled = true;
+  submitBtn.disabled = true;
+  submitBtn.dataset.originalText = submitBtn.textContent;
+  submitBtn.textContent = "Sending...";
+  
+  // Add user message to conversation
+  const userMessageDiv = document.createElement("div");
+  userMessageDiv.className = "quickai-message quickai-user-message";
+  userMessageDiv.innerHTML = `
+    <div class="quickai-message-header">You</div>
+    <div class="quickai-message-content">${escapeHtml(prompt)}</div>
+  `;
+  conversationArea.appendChild(userMessageDiv);
+  
+  // Add AI message placeholder
+  const currentMessageId = Date.now().toString();
+  const aiMessageDiv = document.createElement("div");
+  aiMessageDiv.className = "quickai-message quickai-ai-message";
+  aiMessageDiv.id = currentMessageId;
+  aiMessageDiv.innerHTML = `
+    <div class="quickai-message-header">
+      <span class="quickai-ai-label">AI</span>
+      <span class="quickai-model-label">${modelSelect.options[modelSelect.selectedIndex].text}</span>
+    </div>
+    <div class="quickai-message-content">
+      <div class="quickai-loading-dots">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+  `;
+  conversationArea.appendChild(aiMessageDiv);
+  
+  // Scroll to bottom
+  conversationArea.scrollTop = conversationArea.scrollHeight;
+  
+  // Clear input
+  promptTextarea.value = "";
+  
+  const model = modelSelect.value;
+  
+  try {
+    console.log("Sending screenshot query with messageId:", currentMessageId);
+    console.log("Screenshot length being sent:", screenshotData.length);
+    chrome.runtime.sendMessage({
+      type: "queryAIWithScreenshot",
+      screenshot: screenshotData,
+      contextText: contextText,
+      prompt: prompt,
+      model: model,
+      messageId: currentMessageId
+    });
+    
+    // Save to conversation history
+    const historyItem = {
+      id: currentMessageId,
+      type: 'screenshot',
+      contextText: contextText,
+      screenshot: screenshotData.substring(0, 100) + "...", // Don't store full screenshot in history
+      prompt: prompt,
+      model: model,
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      title: document.title
+    };
+    
+    conversationHistory.push(historyItem);
+    chrome.storage.local.get(['conversations'], (result) => {
+      const conversations = result.conversations || [];
+      conversations.push(historyItem);
+      chrome.storage.local.set({ conversations });
+    });
+  } catch (error) {
+    console.error("Error sending screenshot query:", error);
+    const messageContent = aiMessageDiv.querySelector(".quickai-message-content");
+    messageContent.innerHTML = `<div class="quickai-error">Error: ${error.message}</div>`;
+  } finally {
+    // Re-enable inputs after sending
+    setTimeout(() => {
+      promptTextarea.disabled = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Send";
+      promptTextarea.focus();
+    }, 100);
+  }
+}
