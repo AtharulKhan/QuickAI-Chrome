@@ -57,7 +57,15 @@ async function handleAIQuery(message, tabId) {
         });
 
         // Build system message with context
-        let systemMessage = `You are a helpful AI assistant. The user has selected the following text from a webpage: "${message.context}".`;
+        let systemMessage = `You are a helpful AI assistant. Always format your responses using proper Markdown formatting including:
+- **Bold** for emphasis
+- *Italics* for subtle emphasis
+- Bullet points and numbered lists
+- \`code blocks\` for technical terms
+- Proper headings with ## and ###
+- Line breaks for readability
+
+The user has selected the following text from a webpage: "${message.context}".`;
         
         // Add surrounding context if available
         if (message.fullContext) {
@@ -301,7 +309,15 @@ async function handleLinkSummarization(message, tabId) {
         }
 
         // Build prompt for summarization
-        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. `;
+        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. Always format your responses using proper Markdown formatting including:
+- **Bold** for emphasis
+- *Italics* for subtle emphasis  
+- Bullet points and numbered lists
+- \`code blocks\` for technical terms
+- Proper headings with ## and ###
+- Line breaks for readability
+
+`;
         
         if (linkContent) {
             systemMessage += `Here is the content from the link "${linkUrl}":
@@ -523,7 +539,15 @@ async function handleLinkSummarizationWithContent(message, tabId) {
         });
 
         // Build prompt based on whether we have content
-        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. `;
+        let systemMessage = `You are a helpful AI assistant specialized in summarizing web content. Always format your responses using proper Markdown formatting including:
+- **Bold** for emphasis
+- *Italics* for subtle emphasis
+- Bullet points and numbered lists
+- \`code blocks\` for technical terms
+- Proper headings with ## and ###
+- Line breaks for readability
+
+`;
         
         if (scrapedContent && scrapedContent.content) {
             // We have scraped content
@@ -1168,7 +1192,15 @@ async function handleAIQueryWithGoogle(message, tabId) {
         });
 
         // Build system message with Google search context
-        let systemMessage = `You are a helpful AI assistant. The user performed a Google search for: "${message.searchQuery}".`;
+        let systemMessage = `You are a helpful AI assistant. Always format your responses using proper Markdown formatting including:
+- **Bold** for emphasis
+- *Italics* for subtle emphasis
+- Bullet points and numbered lists
+- \`code blocks\` for technical terms
+- Proper headings with ## and ###
+- Line breaks for readability
+
+The user performed a Google search for: "${message.searchQuery}".`;
         
         // Add Google search results context
         if (message.googleContext && message.googleContext.length > 0) {

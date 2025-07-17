@@ -1543,9 +1543,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
       break;
 
     case "streamChunk":
-      messageContent.innerHTML += message.content;
+      // Accumulate the full response
       messageContent.dataset.fullResponse =
         (messageContent.dataset.fullResponse || "") + message.rawContent;
+      // Format and display the markdown
+      messageContent.innerHTML = formatMarkdown(messageContent.dataset.fullResponse);
       conversationArea.scrollTop = conversationArea.scrollHeight;
       break;
 
@@ -2194,6 +2196,56 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+// Format markdown to HTML
+function formatMarkdown(text) {
+  if (!text) return '';
+  
+  // Escape HTML first to prevent XSS
+  let html = escapeHtml(text);
+  
+  // Headers
+  html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+  
+  // Bold and Italic
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Code blocks
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Lists
+  html = html.replace(/^\* (.*)$/gm, '<li>$1</li>');
+  html = html.replace(/^\- (.*)$/gm, '<li>$1</li>');
+  html = html.replace(/^\d+\. (.*)$/gm, '<li>$1</li>');
+  
+  // Wrap consecutive list items
+  html = html.replace(/(<li>.*<\/li>\s*)+/g, function(match) {
+    return '<ul>' + match + '</ul>';
+  });
+  
+  // Line breaks
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  
+  // Wrap in paragraphs
+  html = '<p>' + html + '</p>';
+  
+  // Clean up empty paragraphs
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<h[1-3]>)/g, '$1');
+  html = html.replace(/(<\/h[1-3]>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<pre>)/g, '$1');
+  html = html.replace(/(<\/pre>)<\/p>/g, '$1');
+  
+  return html;
 }
 
 // Click outside to close
