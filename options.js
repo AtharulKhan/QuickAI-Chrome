@@ -21,6 +21,11 @@ const templateNameInput = document.getElementById('template-name');
 const templateCategoryInput = document.getElementById('template-category');
 const templateContentInput = document.getElementById('template-content');
 
+// Data management DOM elements
+const exportAllDataBtn = document.getElementById('export-all-data');
+const importAllDataBtn = document.getElementById('import-all-data');
+const importAllFileInput = document.getElementById('import-all-file');
+
 // Template state
 let editingTemplateId = null;
 
@@ -372,6 +377,119 @@ exportTemplatesBtn.addEventListener('click', async () => {
     } catch (error) {
         showStatus('Failed to export templates', 'error');
         console.error(error);
+    }
+});
+
+// Export all extension data
+async function exportAllData() {
+    try {
+        // Get all data from storage
+        const syncData = await chrome.storage.sync.get(null);
+        const localData = await chrome.storage.local.get(null);
+        
+        const exportData = {
+            version: '1.0.0',
+            exportDate: new Date().toISOString(),
+            sync: {
+                apiKey: syncData.apiKey || '',
+                lastModel: syncData.lastModel || '',
+                includePageContext: syncData.includePageContext || false,
+                promptTemplates: syncData.promptTemplates || []
+            },
+            local: {
+                history: localData.history || [],
+                conversations: localData.conversations || []
+            }
+        };
+        
+        // Create and download JSON file
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `quickai-backup-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        showStatus('All data exported successfully', 'success');
+    } catch (error) {
+        showStatus('Failed to export data', 'error');
+        console.error('Export error:', error);
+    }
+}
+
+// Import all extension data
+async function importAllData(file) {
+    try {
+        const text = await file.text();
+        const importData = JSON.parse(text);
+        
+        // Validate data structure
+        if (!importData.version || !importData.sync || !importData.local) {
+            throw new Error('Invalid backup file format');
+        }
+        
+        // Validate sync data
+        if (importData.sync.apiKey && !importData.sync.apiKey.startsWith('sk-or-')) {
+            throw new Error('Invalid API key format in backup');
+        }
+        
+        // Confirm with user
+        const confirmMessage = `This will import:
+- API Key: ${importData.sync.apiKey ? 'Yes' : 'No'}
+- ${importData.sync.promptTemplates?.length || 0} prompt templates
+- ${importData.local.history?.length || 0} conversation history entries
+- Selected model: ${importData.sync.lastModel || 'None'}
+- Page context setting: ${importData.sync.includePageContext ? 'Enabled' : 'Disabled'}
+
+This will REPLACE all current data. Continue?`;
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        // Import sync data
+        const syncDataToImport = {};
+        if (importData.sync.apiKey) syncDataToImport.apiKey = importData.sync.apiKey;
+        if (importData.sync.lastModel) syncDataToImport.lastModel = importData.sync.lastModel;
+        if (importData.sync.includePageContext !== undefined) syncDataToImport.includePageContext = importData.sync.includePageContext;
+        if (importData.sync.promptTemplates) syncDataToImport.promptTemplates = importData.sync.promptTemplates;
+        
+        await chrome.storage.sync.set(syncDataToImport);
+        
+        // Import local data
+        const localDataToImport = {};
+        if (importData.local.history) localDataToImport.history = importData.local.history;
+        if (importData.local.conversations) localDataToImport.conversations = importData.local.conversations;
+        
+        await chrome.storage.local.set(localDataToImport);
+        
+        showStatus('Data imported successfully! Refreshing...', 'success');
+        
+        // Reload the page to show new data
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+        
+    } catch (error) {
+        showStatus(`Import failed: ${error.message}`, 'error');
+        console.error('Import error:', error);
+    }
+}
+
+// Data management event handlers
+exportAllDataBtn.addEventListener('click', exportAllData);
+
+importAllDataBtn.addEventListener('click', () => {
+    importAllFileInput.click();
+});
+
+importAllFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        await importAllData(file);
+        // Reset input
+        e.target.value = '';
     }
 });
 

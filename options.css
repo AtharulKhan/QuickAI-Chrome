@@ -258,6 +258,18 @@ kbd {
     text-decoration: underline;
 }
 
+/* Data Management Styles */
+.data-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.data-info {
+    margin-top: 12px;
+}
+
 /* Template Section Styles */
 .templates-controls {
     display: flex;
