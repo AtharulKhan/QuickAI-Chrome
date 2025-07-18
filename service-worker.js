@@ -33,6 +33,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'queryAIWithScreenshot') {
         handleAIQueryWithScreenshot(message, sender.tab.id);
         return true;
+    } else if (message.type === 'performGoogleSearchWithScreenshots') {
+        handleGoogleSearchWithScreenshots(message, sender.tab.id, sendResponse);
+        return true; // Will respond asynchronously
+    } else if (message.type === 'queryAIWithMultipleScreenshots') {
+        handleAIQueryWithMultipleScreenshots(message, sender.tab.id);
+        return true;
     }
 });
 
@@ -1622,6 +1628,368 @@ async function handleAIQueryWithScreenshot(message, tabId) {
 
     } catch (error) {
         console.error('QuickAI Screenshot Error:', error);
+        chrome.tabs.sendMessage(tabId, {
+            type: 'streamError',
+            error: error.message,
+            messageId: message.messageId
+        });
+    }
+}
+
+// Handle Google search with screenshots of top 5 results
+async function handleGoogleSearchWithScreenshots(message, tabId, sendResponse) {
+    const { query } = message;
+    
+    try {
+        console.log('🔍📸 Performing Google search with screenshots for:', query);
+        
+        // First, perform Google search to get top 5 results
+        const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        const searchTab = await chrome.tabs.create({
+            url: googleUrl,
+            active: false
+        });
+        
+        // Wait for search results to load
+        await new Promise((resolve) => {
+            const listener = (tabId, changeInfo) => {
+                if (tabId === searchTab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+            }, 10000);
+        });
+        
+        // Add delay for page rendering
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Extract search results
+        const [searchResults] = await chrome.scripting.executeScript({
+            target: { tabId: searchTab.id },
+            func: extractGoogleSearchResults
+        });
+        
+        await chrome.tabs.remove(searchTab.id);
+        
+        if (!searchResults.result || searchResults.result.length === 0) {
+            throw new Error('No search results found');
+        }
+        
+        // Take only top 5 results
+        const top5Results = searchResults.result.slice(0, 5);
+        console.log(`📸 Capturing screenshots for ${top5Results.length} results`);
+        
+        // Capture screenshots for each result
+        const screenshots = [];
+        for (let i = 0; i < top5Results.length; i++) {
+            const result = top5Results[i];
+            console.log(`📸 Capturing screenshot ${i + 1}/${top5Results.length}: ${result.url}`);
+            
+            try {
+                // Open page in background tab
+                const pageTab = await chrome.tabs.create({
+                    url: result.url,
+                    active: false
+                });
+                
+                // Wait for page to load
+                await new Promise((resolve) => {
+                    const listener = (tabId, changeInfo) => {
+                        if (tabId === pageTab.id && changeInfo.status === 'complete') {
+                            chrome.tabs.onUpdated.removeListener(listener);
+                            resolve();
+                        }
+                    };
+                    chrome.tabs.onUpdated.addListener(listener);
+                    setTimeout(() => {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }, 8000);
+                });
+                
+                // Additional delay for dynamic content
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Capture full page screenshot with progress updates
+                const screenshotData = await captureFullPageScreenshot(pageTab.id, i + 1, top5Results.length, tabId);
+                
+                screenshots.push({
+                    url: result.url,
+                    title: result.title,
+                    description: result.snippet,
+                    data: screenshotData
+                });
+                
+                // Close the tab
+                await chrome.tabs.remove(pageTab.id);
+                
+            } catch (error) {
+                console.error(`Failed to capture screenshot for ${result.url}:`, error);
+                // Continue with other screenshots
+            }
+        }
+        
+        console.log(`✅ Captured ${screenshots.length} screenshots`);
+        sendResponse({ 
+            success: true, 
+            results: { 
+                query: query,
+                screenshots: screenshots 
+            } 
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in Google search with screenshots:', error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+// Capture full page screenshot (reusing existing logic)
+async function captureFullPageScreenshot(tabId, pageIndex, totalPages, mainTabId) {
+    try {
+        // Get page dimensions
+        const [dimensions] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: () => {
+                return {
+                    scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+                    scrollHeight: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+                    viewportWidth: window.innerWidth,
+                    viewportHeight: window.innerHeight,
+                    pageTitle: document.title || 'Untitled'
+                };
+            }
+        });
+        
+        const pageInfo = dimensions.result;
+        
+        // Send initial progress
+        if (mainTabId) {
+            chrome.tabs.sendMessage(mainTabId, {
+                type: 'googleScreenshotProgress',
+                current: pageIndex,
+                total: totalPages,
+                status: `Starting capture of page ${pageIndex}/${totalPages}: ${pageInfo.pageTitle}`,
+                pageProgress: 0
+            });
+        }
+        
+        // If page fits in viewport, capture once
+        if (pageInfo.scrollHeight <= pageInfo.viewportHeight) {
+            if (mainTabId) {
+                chrome.tabs.sendMessage(mainTabId, {
+                    type: 'googleScreenshotProgress',
+                    current: pageIndex,
+                    total: totalPages,
+                    status: `Captured page ${pageIndex}/${totalPages}: ${pageInfo.pageTitle}`,
+                    pageProgress: 100
+                });
+            }
+            return await chrome.tabs.captureVisibleTab(null, {
+                format: 'png',
+                quality: 90
+            });
+        }
+        
+        // Store original scroll position
+        const [originalScroll] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: () => ({ x: window.scrollX, y: window.scrollY })
+        });
+        
+        // Capture screenshots of visible areas
+        const screenshots = [];
+        const viewportHeight = pageInfo.viewportHeight;
+        const totalHeight = pageInfo.scrollHeight;
+        const totalScrolls = Math.ceil(totalHeight / viewportHeight);
+        
+        for (let i = 0, y = 0; y < totalHeight; y += viewportHeight, i++) {
+            // Calculate page capture progress
+            const pageProgress = Math.round(((i + 1) / totalScrolls) * 100);
+            
+            // Send progress update
+            if (mainTabId) {
+                chrome.tabs.sendMessage(mainTabId, {
+                    type: 'googleScreenshotProgress',
+                    current: pageIndex,
+                    total: totalPages,
+                    status: `Capturing page ${pageIndex}/${totalPages}: ${pageInfo.pageTitle} (${pageProgress}%)`,
+                    pageProgress: pageProgress
+                });
+            }
+            
+            // Scroll to position
+            await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: (x, y) => window.scrollTo(x, y),
+                args: [0, y]
+            });
+            
+            // Wait for rendering
+            await new Promise(resolve => setTimeout(resolve, 600));
+            
+            // Capture visible area
+            const screenshot = await chrome.tabs.captureVisibleTab(null, {
+                format: 'png',
+                quality: 90
+            });
+            
+            screenshots.push({
+                dataUrl: screenshot,
+                x: 0,
+                y: y,
+                height: Math.min(viewportHeight, totalHeight - y)
+            });
+        }
+        
+        // Restore scroll position
+        await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: (x, y) => window.scrollTo(x, y),
+            args: [originalScroll.result.x, originalScroll.result.y]
+        });
+        
+        // Stitch screenshots
+        const [stitchedResult] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: stitchScreenshots,
+            args: [screenshots, pageInfo]
+        });
+        
+        return stitchedResult.result.dataUrl || stitchedResult.result;
+        
+    } catch (error) {
+        console.error('Error capturing full page screenshot:', error);
+        // Fallback to single screenshot
+        return await chrome.tabs.captureVisibleTab(null, {
+            format: 'png',
+            quality: 90
+        });
+    }
+}
+
+// Handle AI query with multiple screenshots
+async function handleAIQueryWithMultipleScreenshots(message, tabId) {
+    try {
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            chrome.tabs.sendMessage(tabId, {
+                type: 'streamError',
+                error: 'API key not configured. Please set your OpenRouter API key in the extension options.',
+                messageId: message.messageId
+            });
+            return;
+        }
+        
+        // Notify start of streaming
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamStart',
+            messageId: message.messageId 
+        });
+        
+        // Build content array with multiple screenshots
+        const contentArray = [
+            {
+                type: 'text',
+                text: `The user searched Google for "${message.searchQuery}" and I captured screenshots of the top ${message.screenshots.length} search results. Please analyze these screenshots and answer: ${message.prompt}`
+            }
+        ];
+        
+        // Add each screenshot
+        message.screenshots.forEach((screenshot, index) => {
+            contentArray.push({
+                type: 'text',
+                text: `\n\nScreenshot ${index + 1} - ${screenshot.title} (${screenshot.url}):`
+            });
+            contentArray.push({
+                type: 'image_url',
+                image_url: {
+                    url: screenshot.data
+                }
+            });
+        });
+        
+        const messages = [
+            {
+                role: 'user',
+                content: contentArray
+            }
+        ];
+        
+        // Make API request
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/QuickAI',
+                'X-Title': 'QuickAI Chrome Extension'
+            },
+            body: JSON.stringify({
+                model: message.model,
+                messages: messages,
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 4000
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API request failed: ${response.status} - ${errorText}`);
+        }
+        
+        // Process streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content;
+                        
+                        if (content) {
+                            chrome.tabs.sendMessage(tabId, {
+                                type: 'streamChunk',
+                                content: content,
+                                rawContent: content,
+                                messageId: message.messageId
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error parsing stream data:', e);
+                    }
+                }
+            }
+        }
+        
+        // Notify completion
+        chrome.tabs.sendMessage(tabId, { 
+            type: 'streamEnd',
+            messageId: message.messageId 
+        });
+        
+    } catch (error) {
+        console.error('QuickAI Multiple Screenshots Error:', error);
         chrome.tabs.sendMessage(tabId, {
             type: 'streamError',
             error: error.message,

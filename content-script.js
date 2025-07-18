@@ -438,6 +438,23 @@ function showFloatingButton(type = 'text', rect = null, data = null) {
     });
 
     document.body.appendChild(screenshotButton);
+    
+    // Add combined Google + Screenshot button
+    const googleScreenshotButton = document.createElement("button");
+    googleScreenshotButton.id = "quickai-google-screenshot-button";
+    googleScreenshotButton.innerHTML = "ii";
+    googleScreenshotButton.title = "Search Google and screenshot top 5 results";
+    // Position combined button next to screenshot button
+    googleScreenshotButton.style.top = `${top}px`;
+    googleScreenshotButton.style.left = `${left + 90}px`; // 90px to the right
+    // Add click handler for combined action
+    googleScreenshotButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideFloatingButton();
+      initiateGoogleSearchWithScreenshots(targetRect, selectedText);
+    });
+    document.body.appendChild(googleScreenshotButton);
   }
 }
 
@@ -454,6 +471,10 @@ function hideFloatingButton() {
   if (screenshotButton) {
     screenshotButton.remove();
     screenshotButton = null;
+  }
+  const googleScreenshotButton = document.getElementById("quickai-google-screenshot-button");
+  if (googleScreenshotButton) {
+    googleScreenshotButton.remove();
   }
 }
 
@@ -1524,6 +1545,31 @@ async function submitQueryWithPrompt(contextText, prompt) {
 // Handle streaming responses
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((message) => {
+    // Handle googleScreenshotProgress without requiring messageId
+    if (message.type === "googleScreenshotProgress") {
+      const progressStatus = document.querySelector(".quickai-google-progress-status");
+      const progressBar = document.querySelector(".quickai-google-progress-fill");
+      if (progressStatus && progressBar) {
+        // Update status text with detailed progress
+        progressStatus.textContent = message.status || `Capturing screenshot ${message.current} of ${message.total}...`;
+        
+        // Calculate overall progress
+        let overallProgress;
+        if (message.pageProgress !== undefined) {
+          // More granular progress: account for partial page capture
+          const baseProgress = ((message.current - 1) / message.total) * 100;
+          const pageContribution = (message.pageProgress / message.total);
+          overallProgress = baseProgress + pageContribution;
+        } else {
+          // Simple progress
+          overallProgress = (message.current / message.total) * 100;
+        }
+        
+        progressBar.style.width = `${Math.min(overallProgress, 100)}%`;
+      }
+      return;
+    }
+
     const submitBtn = document.getElementById("quickai-submit");
     const conversationArea = document.getElementById("quickai-conversation");
 
@@ -2248,7 +2294,9 @@ function formatMarkdown(text) {
   return html;
 }
 
-// Click outside to close
+// Click outside to close - DISABLED for all UI types
+// Users must explicitly click the X button to close
+/*
 document.addEventListener("click", (e) => {
   if (activeUI && !activeUI.contains(e.target) && e.target !== floatingButton) {
     const selection = window.getSelection();
@@ -2257,6 +2305,7 @@ document.addEventListener("click", (e) => {
     }
   }
 });
+*/
 
 // Add link hover detection
 document.addEventListener("mouseover", (e) => {
@@ -3104,6 +3153,210 @@ function updateGoogleSearchError(errorMessage) {
   }
 }
 
+// Create Google search + screenshots UI
+function createGoogleScreenshotUI(rect, searchQuery) {
+  if (activeUI) activeUI.remove();
+
+  const container = document.createElement("div");
+  container.id = "quickai-container";
+  container.className = "quickai-container";
+  
+  // Store search query
+  container.dataset.googleQuery = searchQuery;
+  container.dataset.isGoogleScreenshot = "true";
+  
+  // Position near selected text
+  const top = window.scrollY + rect.bottom + 10;
+  const left = window.scrollX + rect.left;
+
+  container.style.top = `${top}px`;
+  container.style.left = `${left}px`;
+
+  container.innerHTML = `
+    <div class="quickai-gradient-border"></div>
+    <div class="quickai-content">
+      <div class="quickai-header">
+        <span class="quickai-title">QuickAI - Google Search + Screenshots</span>
+        <div class="quickai-header-buttons">
+          <button id="quickai-expand" class="quickai-expand" title="Expand">⬜</button>
+          <button id="quickai-clear" class="quickai-clear" title="Clear conversation">🗑️</button>
+          <button id="quickai-close" class="quickai-close">&times;</button>
+        </div>
+      </div>
+      <div class="quickai-context">
+        <strong>Search Query:</strong> <span class="quickai-context-text">${escapeHtml(searchQuery.substring(0, 100))}${searchQuery.length > 100 ? "..." : ""}</span>
+      </div>
+      <div id="quickai-google-screenshot-progress" class="quickai-google-progress">
+        <div class="quickai-google-progress-header">
+          <div class="quickai-google-icon">ii</div>
+          <div class="quickai-google-progress-title">Searching & Capturing Screenshots...</div>
+        </div>
+        <div class="quickai-google-progress-status">Opening Google search and extracting top 5 results...</div>
+        <div class="quickai-google-progress-bar">
+          <div class="quickai-google-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="quickai-google-screenshot-results" id="quickai-google-screenshot-results"></div>
+        <div class="quickai-screenshot-thumbnails" id="quickai-screenshot-thumbnails"></div>
+      </div>
+      <div id="quickai-conversation" class="quickai-conversation"></div>
+      <div class="quickai-input-area">
+        <div class="quickai-textarea-wrapper">
+          <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask about the screenshots from the search results..." rows="3"></textarea>
+          <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 15V13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="quickai-controls">
+          <select id="quickai-model" class="quickai-model"></select>
+          <button id="quickai-submit" class="quickai-submit" disabled>Submit</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+  activeUI = container;
+
+  // Load models and initialize UI
+  loadModelsForGoogleSearch();
+
+  // Add event listeners
+  document.getElementById("quickai-close").addEventListener("click", closeUI);
+  document.getElementById("quickai-clear").addEventListener("click", clearConversation);
+  document.getElementById("quickai-expand").addEventListener("click", toggleExpand);
+  const promptTextarea = document.getElementById("quickai-prompt");
+  promptTextarea.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submitGoogleScreenshotQuery();
+    }
+  });
+  
+  // Voice button
+  const voiceBtn = document.getElementById("quickai-voice");
+  if (voiceBtn) {
+    voiceBtn.addEventListener("click", startVoiceRecognition);
+  }
+}
+
+// Display Google screenshot results
+function displayGoogleScreenshotResults(results) {
+  const progressStatus = document.querySelector(".quickai-google-progress-status");
+  const progressBar = document.querySelector(".quickai-google-progress-fill");
+  const resultsList = document.getElementById("quickai-google-screenshot-results");
+  const thumbnailsContainer = document.getElementById("quickai-screenshot-thumbnails");
+  
+  if (!results || !results.screenshots || results.screenshots.length === 0) {
+    updateGoogleScreenshotError("No screenshots captured");
+    return;
+  }
+  
+  progressStatus.textContent = `Captured ${results.screenshots.length} screenshots from top search results`;
+  progressBar.style.width = "100%";
+  
+  // Display results list
+  resultsList.innerHTML = results.screenshots.map((screenshot, index) => `
+    <div class="quickai-google-result-item" data-index="${index}">
+      <div class="quickai-google-result-status success"></div>
+      <div class="quickai-google-result-title">${escapeHtml(screenshot.title)}</div>
+    </div>
+  `).join('');
+  
+  // Display screenshot thumbnails
+  thumbnailsContainer.innerHTML = `
+    <div class="quickai-screenshot-grid">
+      ${results.screenshots.map((screenshot, index) => `
+        <div class="quickai-screenshot-thumb" data-index="${index}">
+          <img src="${screenshot.data}" alt="${escapeHtml(screenshot.title)}" />
+          <div class="quickai-screenshot-title">${escapeHtml(screenshot.title)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  
+  // Store screenshots data for submission
+  const container = document.getElementById("quickai-container");
+  container.dataset.screenshotsData = JSON.stringify(results.screenshots);
+  
+  // Enable submit button
+  const submitBtn = document.getElementById("quickai-submit");
+  if (submitBtn) {
+    submitBtn.disabled = false;
+  }
+  
+  // Add click handler for submit
+  submitBtn.addEventListener("click", submitGoogleScreenshotQuery);
+}
+
+// Update Google screenshot error
+function updateGoogleScreenshotError(errorMessage) {
+  const progressStatus = document.querySelector(".quickai-google-progress-status");
+  if (progressStatus) {
+    progressStatus.textContent = errorMessage;
+    progressStatus.style.color = "#d32f2f";
+  }
+}
+
+// Submit Google screenshot query
+async function submitGoogleScreenshotQuery() {
+  const prompt = document.getElementById("quickai-prompt").value.trim();
+  if (!prompt) return;
+  
+  const model = document.getElementById("quickai-model").value;
+  const conversationArea = document.getElementById("quickai-conversation");
+  const submitBtn = document.getElementById("quickai-submit");
+  const promptInput = document.getElementById("quickai-prompt");
+  const searchQuery = document.getElementById("quickai-container").dataset.googleQuery;
+  const screenshotsData = JSON.parse(document.getElementById("quickai-container").dataset.screenshotsData);
+  
+  // Add user message to conversation
+  const userMessage = document.createElement("div");
+  userMessage.className = "quickai-message quickai-user-message";
+  userMessage.innerHTML = `<div class="quickai-message-content">${escapeHtml(prompt)}</div>`;
+  conversationArea.appendChild(userMessage);
+  
+  // Clear input
+  promptInput.value = "";
+  
+  // Add AI message container with loading state
+  const aiMessage = document.createElement("div");
+  aiMessage.className = "quickai-message quickai-ai-message";
+  const currentMessageId = `ai-message-${Date.now()}`;
+  aiMessage.id = currentMessageId;
+  aiMessage.innerHTML = '<div class="quickai-message-content"><div class="quickai-loader"></div></div>';
+  conversationArea.appendChild(aiMessage);
+  conversationArea.scrollTop = conversationArea.scrollHeight;
+  
+  // Disable submit button
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Processing...";
+  
+  try {
+    chrome.runtime.sendMessage({
+      type: "queryAIWithMultipleScreenshots",
+      searchQuery: searchQuery,
+      screenshots: screenshotsData,
+      prompt: prompt,
+      model: model,
+      messageId: currentMessageId
+    });
+  } catch (error) {
+    console.error("Failed to send message to service worker:", error);
+    const messageContent = aiMessage.querySelector(".quickai-message-content");
+    if (messageContent) {
+      messageContent.innerHTML = '<div class="quickai-error">Failed to connect to QuickAI service. Please refresh the page and try again.</div>';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit";
+    }
+  }
+}
+
 // Debug function to test template loading (accessible from console)
 window.debugQuickAITemplates = async function() {
   try {
@@ -3202,6 +3455,39 @@ async function initiateScreenshotCapture(rect, contextText) {
   } catch (error) {
     console.error("Error initiating screenshot capture:", error);
     alert("Failed to capture screenshot");
+  }
+}
+
+// Initiate Google search with screenshots of top 5 results
+async function initiateGoogleSearchWithScreenshots(rect, searchQuery) {
+  try {
+    // Create UI for combined Google search + screenshots
+    createGoogleScreenshotUI(rect, searchQuery);
+    
+    // Clear previous results
+    googleSearchResults = [];
+    googleScrapedContent.clear();
+    
+    // Request service worker to handle Google search and screenshots
+    chrome.runtime.sendMessage({
+      type: "performGoogleSearchWithScreenshots",
+      query: searchQuery
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to perform Google search with screenshots:", chrome.runtime.lastError);
+        updateGoogleScreenshotError("Failed to perform search");
+        return;
+      }
+      
+      if (response && response.results) {
+        displayGoogleScreenshotResults(response.results);
+      } else {
+        updateGoogleScreenshotError("No results found");
+      }
+    });
+  } catch (error) {
+    console.error("Error initiating Google search with screenshots:", error);
+    updateGoogleScreenshotError("Search failed");
   }
 }
 
