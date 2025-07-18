@@ -39,6 +39,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.type === 'queryAIWithMultipleScreenshots') {
         handleAIQueryWithMultipleScreenshots(message, sender.tab.id);
         return true;
+    } else if (message.action === 'cleanupTranscript') {
+        handleTranscriptCleanup(message, sendResponse);
+        return true; // Will respond asynchronously
     }
 });
 
@@ -1995,5 +1998,58 @@ async function handleAIQueryWithMultipleScreenshots(message, tabId) {
             error: error.message,
             messageId: message.messageId
         });
+    }
+}
+
+// Handle transcript cleanup
+async function handleTranscriptCleanup(message, sendResponse) {
+    try {
+        // Get API key from storage
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        
+        if (!apiKey) {
+            sendResponse({ error: 'API key not configured. Please set your OpenRouter API key in the extension options.' });
+            return;
+        }
+
+        const cleanupPrompt = `Clean up this voice transcript by fixing grammar, adding proper punctuation, and formatting it clearly. Keep the meaning identical but make it readable and well-formatted. Only return the cleaned transcript, nothing else.
+
+Transcript: ${message.transcript}`;
+
+        // Make API call
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+                'HTTP-Referer': chrome.runtime.getURL(''), 
+                'X-Title': 'QuickAI'
+            },
+            body: JSON.stringify({
+                model: message.model || 'google/gemini-2.0-flash-thinking',
+                messages: [
+                    {
+                        role: 'user',
+                        content: cleanupPrompt
+                    }
+                ],
+                temperature: 0.3, // Lower temperature for more consistent cleanup
+                max_tokens: 1000
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+        }
+
+        const data = await response.json();
+        const cleanedText = data.choices[0]?.message?.content?.trim() || message.transcript;
+        
+        sendResponse({ cleanedText });
+        
+    } catch (error) {
+        console.error('Transcript cleanup error:', error);
+        sendResponse({ error: error.message });
     }
 }

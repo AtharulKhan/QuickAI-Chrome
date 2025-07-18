@@ -574,7 +574,7 @@ async function createFloatingUI(rect, contextText, contextData = null, editable 
                 <div class="quickai-input-area">
                     <div class="quickai-textarea-wrapper">
                         <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask a question about the selected text..." rows="3"></textarea>
-                        <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+                        <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text with AI cleanup" aria-label="Voice to text with AI cleanup">
                             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -844,7 +844,7 @@ async function createFloatingUIForLink(rect, linkUrl, linkText) {
         <div class="quickai-input-area">
           <div class="quickai-textarea-wrapper">
             <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask follow-up questions about this link..." rows="3"></textarea>
-            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text with AI cleanup" aria-label="Voice to text with AI cleanup">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -2458,7 +2458,7 @@ function startVoiceRecognition() {
     recognition.onend = () => {
       isRecording = false;
       voiceBtn.classList.remove('recording');
-      voiceBtn.title = 'Voice to text';
+      voiceBtn.title = 'Voice to text with AI cleanup';
     };
     
     recognition.onresult = (event) => {
@@ -2474,26 +2474,13 @@ function startVoiceRecognition() {
         }
       }
       
-      // Update textarea with the transcribed text
-      if (finalTranscript || interimTranscript) {
-        const currentValue = promptTextarea.value;
-        const cursorPosition = promptTextarea.selectionStart;
-        
-        // If there's final transcript, append it
-        if (finalTranscript) {
-          const beforeCursor = currentValue.substring(0, cursorPosition);
-          const afterCursor = currentValue.substring(cursorPosition);
-          
-          // Add space if needed
-          const needsSpace = beforeCursor.length > 0 && !beforeCursor.endsWith(' ');
-          const newValue = beforeCursor + (needsSpace ? ' ' : '') + finalTranscript + afterCursor;
-          
-          promptTextarea.value = newValue;
-          
-          // Move cursor to end of inserted text
-          const newPosition = beforeCursor.length + (needsSpace ? 1 : 0) + finalTranscript.length;
-          promptTextarea.setSelectionRange(newPosition, newPosition);
-        }
+      // When we have a final transcript, send it for cleanup
+      if (finalTranscript) {
+        cleanupTranscript(finalTranscript.trim(), promptTextarea);
+      } else if (interimTranscript) {
+        // Show interim results in a temporary way
+        const tempText = `[Recording...] ${interimTranscript}`;
+        promptTextarea.value = tempText;
       }
     };
     
@@ -2515,6 +2502,43 @@ function startVoiceRecognition() {
   } catch (error) {
     console.error('Failed to start speech recognition:', error);
     alert('Failed to start voice recognition. Please try again.');
+  }
+}
+
+// Clean up transcript using AI
+async function cleanupTranscript(rawTranscript, promptTextarea) {
+  // Show loading state
+  const originalValue = promptTextarea.value;
+  promptTextarea.value = `[Cleaning up transcript...] ${rawTranscript}`;
+  promptTextarea.disabled = true;
+  
+  try {
+    // Get current model
+    const modelSelect = document.getElementById("quickai-model");
+    const currentModel = modelSelect?.value || "google/gemini-2.0-flash-thinking";
+    
+    // Send message to service worker for transcript cleanup
+    const response = await chrome.runtime.sendMessage({
+      action: "cleanupTranscript",
+      transcript: rawTranscript,
+      model: currentModel
+    });
+    
+    if (response.error) {
+      console.error("Transcript cleanup error:", response.error);
+      // Fall back to raw transcript
+      promptTextarea.value = rawTranscript;
+    } else if (response.cleanedText) {
+      // Use cleaned transcript
+      promptTextarea.value = response.cleanedText;
+    }
+  } catch (error) {
+    console.error("Failed to clean up transcript:", error);
+    // Fall back to raw transcript
+    promptTextarea.value = rawTranscript;
+  } finally {
+    promptTextarea.disabled = false;
+    promptTextarea.focus();
   }
 }
 
@@ -2909,7 +2933,7 @@ function createGoogleSearchUI(rect, searchQuery) {
       <div class="quickai-input-area">
         <div class="quickai-textarea-wrapper">
           <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Add your question about the search results..." rows="3"></textarea>
-          <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+          <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text with AI cleanup" aria-label="Voice to text with AI cleanup">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -3208,6 +3232,9 @@ function createGoogleScreenshotUI(rect, searchQuery) {
               <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M8 15V13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
+          </button>
+          <button id="quickai-voice-cleanup" class="quickai-voice-cleanup-btn" title="Voice to text with AI cleanup" aria-label="Voice to text with AI cleanup">
+            <span class="quickai-red-dot">·</span>
           </button>
         </div>
         <div class="quickai-controls">
@@ -3551,7 +3578,7 @@ async function createScreenshotUI(rect, screenshotData, contextText, fallbackErr
         <div class="quickai-input-area">
           <div class="quickai-textarea-wrapper">
             <textarea id="quickai-prompt" class="quickai-prompt" placeholder="Ask about this screenshot..." rows="3"></textarea>
-            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text" aria-label="Voice to text">
+            <button id="quickai-voice" class="quickai-voice-btn" title="Voice to text with AI cleanup" aria-label="Voice to text with AI cleanup">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M8 11C9.66 11 11 9.66 11 8V4C11 2.34 9.66 1 8 1C6.34 1 5 2.34 5 4V8C5 9.66 6.34 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M13 8C13 10.76 10.76 13 8 13C5.24 13 3 10.76 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -3601,8 +3628,10 @@ async function createScreenshotUI(rect, screenshotData, contextText, fallbackErr
       }
     });
 
-    // Initialize voice input
-    initializeVoiceInput();
+    // Add voice button listener
+    document.getElementById("quickai-voice").addEventListener("click", () => {
+      startVoiceRecognition();
+    });
 
     // Focus on prompt
     promptTextarea.focus();
