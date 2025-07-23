@@ -32,6 +32,116 @@ const importAllFileInput = document.getElementById('import-all-file');
 let editingTemplateId = null;
 let templateSearchQuery = '';
 
+// Hybrid Storage Helper Functions
+// Store template metadata in sync storage and full content in local storage
+const templateStorage = {
+    // Get all templates using hybrid storage
+    async getAll() {
+        try {
+            // Get metadata from sync storage
+            const { templateMetadata = [] } = await chrome.storage.sync.get('templateMetadata');
+            
+            // If no metadata, check for legacy templates in sync storage
+            const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+            if (promptTemplates.length > 0 && templateMetadata.length === 0) {
+                // Migrate legacy templates
+                await this.migrateLegacyTemplates(promptTemplates);
+                return promptTemplates;
+            }
+            
+            // Get full template data from local storage
+            const templateIds = templateMetadata.map(t => `template_${t.id}`);
+            if (templateIds.length === 0) return [];
+            
+            const localData = await chrome.storage.local.get(templateIds);
+            
+            // Combine metadata with full content
+            return templateMetadata.map(meta => {
+                const fullTemplate = localData[`template_${meta.id}`];
+                return fullTemplate || { ...meta, content: '' }; // Fallback if local data missing
+            });
+        } catch (error) {
+            console.error('Failed to get templates:', error);
+            return [];
+        }
+    },
+    
+    // Save templates using hybrid storage
+    async saveAll(templates) {
+        try {
+            // Prepare metadata for sync storage (lightweight)
+            const metadata = templates.map(({ id, name, category }) => ({ id, name, category }));
+            
+            // Prepare full templates for local storage
+            const localData = {};
+            templates.forEach(template => {
+                localData[`template_${template.id}`] = template;
+            });
+            
+            // Save to both storages
+            await Promise.all([
+                chrome.storage.sync.set({ templateMetadata: metadata }),
+                chrome.storage.local.set(localData)
+            ]);
+            
+            // Clean up legacy sync storage if migration complete
+            await chrome.storage.sync.remove('promptTemplates');
+        } catch (error) {
+            console.error('Failed to save templates:', error);
+            throw error;
+        }
+    },
+    
+    // Add or update a single template
+    async save(template) {
+        const templates = await this.getAll();
+        const index = templates.findIndex(t => t.id === template.id);
+        
+        if (index !== -1) {
+            templates[index] = template;
+        } else {
+            templates.push(template);
+        }
+        
+        await this.saveAll(templates);
+    },
+    
+    // Delete a template
+    async delete(templateId) {
+        const templates = await this.getAll();
+        const filtered = templates.filter(t => t.id !== templateId);
+        
+        // Remove from local storage
+        await chrome.storage.local.remove(`template_${templateId}`);
+        
+        // Update metadata
+        await this.saveAll(filtered);
+    },
+    
+    // Migrate legacy templates from sync to hybrid storage
+    async migrateLegacyTemplates(legacyTemplates) {
+        console.log('Migrating legacy templates to hybrid storage...');
+        try {
+            await this.saveAll(legacyTemplates);
+            console.log('Migration complete');
+        } catch (error) {
+            console.error('Migration failed:', error);
+        }
+    },
+    
+    // Check if template size is within limits
+    validateSize(template) {
+        const metadataSize = JSON.stringify({ id: template.id, name: template.name, category: template.category }).length;
+        const fullSize = JSON.stringify(template).length;
+        
+        return {
+            isValid: metadataSize < 1024, // Keep metadata well under sync limit
+            metadataSize,
+            fullSize
+        };
+    }
+};
+
 // Load saved settings
 async function loadSettings() {
     const { apiKey } = await chrome.storage.sync.get('apiKey');
@@ -160,14 +270,14 @@ const DEFAULT_TEMPLATES = [
 // Template Management Functions
 async function loadTemplates() {
     try {
-        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        const templates = await templateStorage.getAll();
         
         // If no templates exist, initialize with defaults
-        if (promptTemplates.length === 0) {
-            await chrome.storage.sync.set({ promptTemplates: DEFAULT_TEMPLATES });
+        if (templates.length === 0) {
+            await templateStorage.saveAll(DEFAULT_TEMPLATES);
             displayTemplates(DEFAULT_TEMPLATES, templateSearchQuery);
         } else {
-            displayTemplates(promptTemplates, templateSearchQuery);
+            displayTemplates(templates, templateSearchQuery);
         }
     } catch (error) {
         console.error('Failed to load templates:', error);
@@ -259,8 +369,8 @@ function escapeRegExp(string) {
 
 async function handleEditTemplate(e) {
     const templateId = e.target.closest('.template-item').dataset.id;
-    const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
-    const template = promptTemplates.find(t => t.id === templateId);
+    const templates = await templateStorage.getAll();
+    const template = templates.find(t => t.id === templateId);
     
     if (template) {
         editingTemplateId = templateId;
@@ -278,9 +388,7 @@ async function handleDeleteTemplate(e) {
     
     if (confirmed) {
         try {
-            const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
-            const filtered = promptTemplates.filter(t => t.id !== templateId);
-            await chrome.storage.sync.set({ promptTemplates: filtered });
+            await templateStorage.delete(templateId);
             loadTemplates();
             showStatus('Template deleted successfully', 'success');
         } catch (error) {
@@ -315,26 +423,22 @@ saveTemplateBtn.addEventListener('click', async () => {
     }
     
     try {
-        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        const template = {
+            id: editingTemplateId || `custom-${Date.now()}`,
+            name,
+            category,
+            content
+        };
         
-        if (editingTemplateId) {
-            // Update existing template
-            const index = promptTemplates.findIndex(t => t.id === editingTemplateId);
-            if (index !== -1) {
-                promptTemplates[index] = { id: editingTemplateId, name, category, content };
-            }
-        } else {
-            // Add new template
-            const newTemplate = {
-                id: `custom-${Date.now()}`,
-                name,
-                category,
-                content
-            };
-            promptTemplates.push(newTemplate);
+        // Validate template size
+        const sizeCheck = templateStorage.validateSize(template);
+        if (!sizeCheck.isValid) {
+            showStatus(`Template metadata too large (${sizeCheck.metadataSize} bytes). Please use a shorter name or category.`, 'error');
+            return;
         }
         
-        await chrome.storage.sync.set({ promptTemplates });
+        await templateStorage.save(template);
+        
         templateForm.style.display = 'none';
         editingTemplateId = null;
         loadTemplates();
@@ -362,7 +466,7 @@ importFileInput.addEventListener('change', async (e) => {
             throw new Error('Invalid template format');
         }
         
-        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        const currentTemplates = await templateStorage.getAll();
         
         // Add imported templates with new IDs to avoid conflicts
         const newTemplates = imported.map(t => ({
@@ -372,8 +476,15 @@ importFileInput.addEventListener('change', async (e) => {
             content: t.content
         }));
         
-        const combined = [...promptTemplates, ...newTemplates];
-        await chrome.storage.sync.set({ promptTemplates: combined });
+        // Validate sizes
+        const oversizedTemplates = newTemplates.filter(t => !templateStorage.validateSize(t).isValid);
+        if (oversizedTemplates.length > 0) {
+            showStatus(`${oversizedTemplates.length} templates have metadata that's too large. Please shorten names/categories.`, 'error');
+            return;
+        }
+        
+        const combined = [...currentTemplates, ...newTemplates];
+        await templateStorage.saveAll(combined);
         loadTemplates();
         showStatus(`Imported ${newTemplates.length} templates successfully`, 'success');
     } catch (error) {
@@ -387,10 +498,10 @@ importFileInput.addEventListener('change', async (e) => {
 
 exportTemplatesBtn.addEventListener('click', async () => {
     try {
-        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        const templates = await templateStorage.getAll();
         
         // Clean up templates for export (remove IDs)
-        const exportData = promptTemplates.map(({ name, category, content }) => ({
+        const exportData = templates.map(({ name, category, content }) => ({
             name,
             category,
             content
@@ -418,18 +529,25 @@ async function exportAllData() {
         const syncData = await chrome.storage.sync.get(null);
         const localData = await chrome.storage.local.get(null);
         
+        // Get templates using hybrid storage
+        const templates = await templateStorage.getAll();
+        
         const exportData = {
-            version: '1.0.0',
+            version: '1.1.0', // Updated version for new storage format
             exportDate: new Date().toISOString(),
             sync: {
                 apiKey: syncData.apiKey || '',
                 lastModel: syncData.lastModel || '',
                 includePageContext: syncData.includePageContext || false,
+                templateMetadata: syncData.templateMetadata || [],
+                // Include legacy templates if they exist
                 promptTemplates: syncData.promptTemplates || []
             },
             local: {
                 history: localData.history || [],
-                conversations: localData.conversations || []
+                conversations: localData.conversations || [],
+                // Include full templates
+                templates: templates
             }
         };
         
@@ -465,10 +583,18 @@ async function importAllData(file) {
             throw new Error('Invalid API key format in backup');
         }
         
+        // Determine template count based on version
+        let templateCount = 0;
+        if (importData.version === '1.1.0' && importData.local.templates) {
+            templateCount = importData.local.templates.length;
+        } else if (importData.sync.promptTemplates) {
+            templateCount = importData.sync.promptTemplates.length;
+        }
+        
         // Confirm with user
         const confirmMessage = `This will import:
 - API Key: ${importData.sync.apiKey ? 'Yes' : 'No'}
-- ${importData.sync.promptTemplates?.length || 0} prompt templates
+- ${templateCount} prompt templates
 - ${importData.local.history?.length || 0} conversation history entries
 - Selected model: ${importData.sync.lastModel || 'None'}
 - Page context setting: ${importData.sync.includePageContext ? 'Enabled' : 'Disabled'}
@@ -484,8 +610,17 @@ This will REPLACE all current data. Continue?`;
         if (importData.sync.apiKey) syncDataToImport.apiKey = importData.sync.apiKey;
         if (importData.sync.lastModel) syncDataToImport.lastModel = importData.sync.lastModel;
         if (importData.sync.includePageContext !== undefined) syncDataToImport.includePageContext = importData.sync.includePageContext;
-        if (importData.sync.promptTemplates) syncDataToImport.promptTemplates = importData.sync.promptTemplates;
         
+        // Handle templates based on version
+        if (importData.version === '1.1.0' && importData.local.templates) {
+            // New format with hybrid storage
+            await templateStorage.saveAll(importData.local.templates);
+        } else if (importData.sync.promptTemplates) {
+            // Legacy format - import and migrate
+            await templateStorage.saveAll(importData.sync.promptTemplates);
+        }
+        
+        // Don't import legacy promptTemplates to sync storage
         await chrome.storage.sync.set(syncDataToImport);
         
         // Import local data

@@ -16,6 +16,34 @@ let googleScrapedContent = new Map(); // Store scraped content from Google resul
 
 console.log("QuickAI content script loaded on:", window.location.href);
 
+// Helper function to load templates with hybrid storage support
+async function loadTemplates() {
+  try {
+    // First, try to get metadata from sync storage (new format)
+    const { templateMetadata = [] } = await chrome.storage.sync.get("templateMetadata");
+    
+    // If we have metadata, load full templates from local storage
+    if (templateMetadata.length > 0) {
+      const templateIds = templateMetadata.map(t => `template_${t.id}`);
+      const localData = await chrome.storage.local.get(templateIds);
+      
+      // Combine metadata with full content
+      return templateMetadata.map(meta => {
+        const fullTemplate = localData[`template_${meta.id}`];
+        return fullTemplate || { ...meta, content: '' };
+      });
+    }
+    
+    // Fall back to legacy format if no metadata found
+    const { promptTemplates = [] } = await chrome.storage.sync.get("promptTemplates");
+    return promptTemplates;
+  } catch (error) {
+    console.error("Error loading templates:", error);
+    // Return empty array if there's an error
+    return [];
+  }
+}
+
 // Extract context paragraphs before and after selection
 function extractFullContext(selection) {
   if (!selection || selection.rangeCount === 0) return null;
@@ -4306,8 +4334,8 @@ async function initiatePromptSearch(rect, selectedText) {
     container.style.top = `${top}px`;
     container.style.left = `${left}px`;
 
-    // Load prompt templates
-    const { promptTemplates = [] } = await chrome.storage.sync.get("promptTemplates");
+    // Load prompt templates using hybrid storage
+    const promptTemplates = await loadTemplates();
 
     container.innerHTML = `
       <div class="quickai-gradient-border"></div>
