@@ -44,10 +44,26 @@
             <h2>Prompt Templates</h2>
             <p>Create and manage reusable prompt templates. Use @ in the chat to quickly access them.</p>
             
-            <div class="templates-controls">
-                <button id="add-template" class="primary-button">Add New Template</button>
-                <button id="import-templates" class="secondary-button">Import</button>
-                <button id="export-templates" class="secondary-button">Export</button>
+            <div class="templates-header">
+                <div class="search-bar">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input type="text" id="template-search" placeholder="Search templates..." autocomplete="off">
+                    <button id="clear-template-search" class="clear-search" style="display: none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="templates-controls">
+                    <button id="add-template" class="primary-button">Add New Template</button>
+                    <button id="import-templates" class="secondary-button">Import</button>
+                    <button id="export-templates" class="secondary-button">Export</button>
+                </div>
             </div>
 
             <div id="template-form" class="template-form" style="display: none;">

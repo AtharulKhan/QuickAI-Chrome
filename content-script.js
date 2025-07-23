@@ -484,6 +484,23 @@ function showFloatingButton(type = "text", rect = null, data = null) {
       initiateGoogleSearchWithScreenshots(targetRect, selectedText);
     });
     document.body.appendChild(googleScreenshotButton);
+
+    // Add Prompt Search button
+    const promptSearchButton = document.createElement("button");
+    promptSearchButton.id = "quickai-prompt-search-button";
+    promptSearchButton.innerHTML = "P";
+    promptSearchButton.title = "Search and copy prompts";
+    // Position prompt search button next to combined button
+    promptSearchButton.style.top = `${top}px`;
+    promptSearchButton.style.left = `${left + 120}px`; // 120px to the right
+    // Add click handler for prompt search
+    promptSearchButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideFloatingButton();
+      initiatePromptSearch(targetRect, selectedText);
+    });
+    document.body.appendChild(promptSearchButton);
   }
 }
 
@@ -506,6 +523,12 @@ function hideFloatingButton() {
   );
   if (googleScreenshotButton) {
     googleScreenshotButton.remove();
+  }
+  const promptSearchButton = document.getElementById(
+    "quickai-prompt-search-button"
+  );
+  if (promptSearchButton) {
+    promptSearchButton.remove();
   }
 }
 
@@ -4264,4 +4287,260 @@ async function handleScreenshotSubmit() {
       promptTextarea.focus();
     }, 100);
   }
+}
+
+// Initiate prompt search UI
+async function initiatePromptSearch(rect, selectedText) {
+  try {
+    // Create prompt search UI
+    if (activeUI) activeUI.remove();
+
+    const container = document.createElement("div");
+    container.id = "quickai-prompt-search-container";
+    container.className = "quickai-container quickai-prompt-search";
+
+    // Position near selected text
+    const top = window.scrollY + rect.bottom + 10;
+    const left = window.scrollX + rect.left;
+
+    container.style.top = `${top}px`;
+    container.style.left = `${left}px`;
+
+    // Load prompt templates
+    const { promptTemplates = [] } = await chrome.storage.sync.get("promptTemplates");
+
+    container.innerHTML = `
+      <div class="quickai-gradient-border"></div>
+      <div class="quickai-content">
+        <div class="quickai-header">
+          <span class="quickai-title">Search Prompts</span>
+          <button id="quickai-prompt-search-close" class="quickai-close">&times;</button>
+        </div>
+        <div class="quickai-prompt-search-body">
+          <input type="text" id="quickai-prompt-search-input" 
+                 class="quickai-prompt-search-input" 
+                 placeholder="Search prompts by name, category, or content..." 
+                 autocomplete="off">
+          <div id="quickai-prompt-results" class="quickai-prompt-results">
+            ${promptTemplates.length === 0 
+              ? '<div class="quickai-no-prompts">No prompts saved. Add prompts in extension options.</div>'
+              : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+    activeUI = container;
+
+    // Setup event handlers
+    const searchInput = container.querySelector("#quickai-prompt-search-input");
+    const resultsDiv = container.querySelector("#quickai-prompt-results");
+    const closeBtn = container.querySelector("#quickai-prompt-search-close");
+
+    // Focus search input
+    searchInput.focus();
+
+    // Display all prompts initially
+    displayPromptSearchResults(promptTemplates, resultsDiv, "");
+
+    // Search handler
+    let searchTimeout;
+    searchInput.addEventListener("input", (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        const searchQuery = e.target.value.trim();
+        displayPromptSearchResults(promptTemplates, resultsDiv, searchQuery);
+      }, 150);
+    });
+
+    // Keyboard navigation
+    let selectedIndex = -1;
+    searchInput.addEventListener("keydown", (e) => {
+      const items = resultsDiv.querySelectorAll(".quickai-prompt-item");
+      
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+          updatePromptSelection(items, selectedIndex);
+          break;
+          
+        case "ArrowUp":
+          e.preventDefault();
+          selectedIndex = Math.max(selectedIndex - 1, 0);
+          updatePromptSelection(items, selectedIndex);
+          break;
+          
+        case "Enter":
+          e.preventDefault();
+          if (selectedIndex >= 0 && items[selectedIndex]) {
+            items[selectedIndex].click();
+          }
+          break;
+          
+        case "Escape":
+          e.preventDefault();
+          container.remove();
+          activeUI = null;
+          break;
+      }
+    });
+
+    // Close button
+    closeBtn.addEventListener("click", () => {
+      container.remove();
+      activeUI = null;
+    });
+
+    // Click outside to close
+    setTimeout(() => {
+      document.addEventListener("click", function closeOnClickOutside(e) {
+        if (!container.contains(e.target)) {
+          container.remove();
+          activeUI = null;
+          document.removeEventListener("click", closeOnClickOutside);
+        }
+      });
+    }, 100);
+
+  } catch (error) {
+    console.error("Error creating prompt search UI:", error);
+  }
+}
+
+// Display prompt search results
+function displayPromptSearchResults(templates, resultsDiv, searchQuery) {
+  // Filter templates
+  let filteredTemplates = templates;
+  if (searchQuery) {
+    const query = searchQuery.toLowerCase();
+    filteredTemplates = templates.filter(template => 
+      template.name.toLowerCase().includes(query) ||
+      (template.category && template.category.toLowerCase().includes(query)) ||
+      template.content.toLowerCase().includes(query)
+    );
+  }
+
+  if (filteredTemplates.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="quickai-no-results">
+        ${searchQuery ? 'No prompts found matching your search.' : 'No prompts saved.'}
+      </div>
+    `;
+    return;
+  }
+
+  // Group by category
+  const grouped = {};
+  filteredTemplates.forEach(template => {
+    const category = template.category || "Uncategorized";
+    if (!grouped[category]) grouped[category] = [];
+    grouped[category].push(template);
+  });
+
+  let html = "";
+  Object.entries(grouped).forEach(([category, templates]) => {
+    html += `<div class="quickai-prompt-category">
+      <div class="quickai-prompt-category-title">${escapeHtml(category)}</div>`;
+    
+    templates.forEach((template, index) => {
+      const preview = template.content.substring(0, 100) + 
+                      (template.content.length > 100 ? "..." : "");
+      
+      html += `
+        <div class="quickai-prompt-item" data-template-id="${template.id || index}">
+          <div class="quickai-prompt-name">${highlightSearchTerm(escapeHtml(template.name), searchQuery)}</div>
+          <div class="quickai-prompt-preview">${highlightSearchTerm(escapeHtml(preview), searchQuery)}</div>
+        </div>
+      `;
+    });
+    
+    html += `</div>`;
+  });
+
+  resultsDiv.innerHTML = html;
+
+  // Add click handlers
+  resultsDiv.querySelectorAll(".quickai-prompt-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      // Find the actual template by matching the displayed content
+      const templateId = item.dataset.templateId;
+      let template;
+      
+      // Try to find by ID first
+      if (templateId && templateId !== 'undefined') {
+        template = filteredTemplates.find(t => t.id === templateId);
+      }
+      
+      // If not found by ID, find by matching name
+      if (!template) {
+        const name = item.querySelector('.quickai-prompt-name').textContent;
+        template = filteredTemplates.find(t => t.name === name);
+      }
+      
+      if (template) {
+        copyPromptTemplate(template.content);
+        activeUI.remove();
+        activeUI = null;
+      }
+    });
+  });
+}
+
+// Update visual selection for keyboard navigation
+function updatePromptSelection(items, selectedIndex) {
+  items.forEach((item, index) => {
+    if (index === selectedIndex) {
+      item.classList.add("selected");
+      item.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else {
+      item.classList.remove("selected");
+    }
+  });
+}
+
+// Highlight search term in text
+function highlightSearchTerm(text, searchTerm) {
+  if (!searchTerm) return text;
+  
+  const regex = new RegExp(`(${escapeRegExp(searchTerm)})`, "gi");
+  return text.replace(regex, '<span class="quickai-highlight">$1</span>');
+}
+
+// Escape regex special characters
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Copy prompt template to clipboard
+function copyPromptTemplate(promptContent) {
+  navigator.clipboard.writeText(promptContent).then(() => {
+    showNotification("Prompt copied to clipboard!", "success");
+  }).catch(err => {
+    console.error("Failed to copy to clipboard:", err);
+    showNotification("Failed to copy prompt to clipboard", "error");
+  });
+}
+
+// Show notification
+function showNotification(message, type = "info") {
+  const notification = document.createElement("div");
+  notification.className = `quickai-notification quickai-notification-${type}`;
+  notification.textContent = message;
+  
+  document.body.appendChild(notification);
+  
+  // Animate in
+  setTimeout(() => {
+    notification.classList.add("show");
+  }, 10);
+  
+  // Remove after 3 seconds
+  setTimeout(() => {
+    notification.classList.remove("show");
+    setTimeout(() => {
+      notification.remove();
+    }, 300);
+  }, 3000);
 }

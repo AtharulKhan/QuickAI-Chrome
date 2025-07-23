@@ -512,79 +512,69 @@ async function updateStorageUsage() {
 
 // Export history
 function exportHistory() {
-    const dialog = document.createElement('div');
-    dialog.className = 'export-dialog';
-    dialog.innerHTML = `
-        <h3>Export History</h3>
-        <div class="export-options">
-            <label class="export-option">
-                <input type="radio" name="export-format" value="json" checked>
-                <span>JSON (Complete data)</span>
-            </label>
-            <label class="export-option">
-                <input type="radio" name="export-format" value="markdown">
-                <span>Markdown (Human-readable)</span>
-            </label>
-        </div>
-        <div class="dialog-buttons">
-            <button class="btn-secondary" onclick="this.closest('.export-dialog').remove(); document.querySelector('.dialog-overlay').remove();">Cancel</button>
-            <button class="btn-primary" onclick="performExport()">Export</button>
-        </div>
-    `;
-    
-    const overlay = document.createElement('div');
-    overlay.className = 'dialog-overlay';
-    overlay.onclick = () => {
-        dialog.remove();
-        overlay.remove();
-    };
-    
-    document.body.appendChild(overlay);
-    document.body.appendChild(dialog);
+    performExport();
 }
 
 // Perform export
-window.performExport = function() {
-    const format = document.querySelector('input[name="export-format"]:checked').value;
-    const dataToExport = filteredHistory.length > 0 ? filteredHistory : allHistory;
-    
-    let content, filename;
-    
-    if (format === 'json') {
-        content = JSON.stringify(dataToExport, null, 2);
-        filename = `quickai-history-${new Date().toISOString().split('T')[0]}.json`;
-    } else {
-        content = '# QuickAI Conversation History\n\n';
-        dataToExport.forEach(item => {
-            const date = new Date(item.timestamp);
-            content += `## ${item.title || item.prompt}\n`;
-            content += `**Date:** ${date.toLocaleDateString()} ${date.toLocaleTimeString()}\n`;
-            content += `**Model:** ${getModelDisplayName(item.model)}\n`;
-            if (item.tags.length > 0) {
-                content += `**Tags:** ${item.tags.join(', ')}\n`;
-            }
-            content += `\n**Context:** ${item.context}\n\n`;
-            content += `**Prompt:** ${item.prompt}\n\n`;
-            content += `**Response:**\n${item.response}\n\n---\n\n`;
-        });
-        filename = `quickai-history-${new Date().toISOString().split('T')[0]}.md`;
+window.performExport = async function() {
+    try {
+        const dataToExport = filteredHistory.length > 0 ? filteredHistory : allHistory;
+        
+        // Get prompt templates
+        const { promptTemplates = [] } = await chrome.storage.sync.get('promptTemplates');
+        
+        // Create export object with both history and prompts
+        const exportData = {
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            history: dataToExport,
+            promptTemplates: promptTemplates
+        };
+        
+        const content = JSON.stringify(exportData, null, 2);
+        const filename = `quickai-export-${new Date().toISOString().split('T')[0]}.json`;
+        
+        // Create and download file
+        const blob = new Blob([content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        // Show success notification
+        showNotification('Export completed successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Export failed:', error);
+        showNotification('Export failed. Please try again.', 'error');
     }
-    
-    // Create and download file
-    const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    // Close dialog
-    document.querySelector('.export-dialog').remove();
-    document.querySelector('.dialog-overlay').remove();
 };
+
+// Show notification
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `history-notification history-notification-${type}`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    // Animate in
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 10);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            notification.remove();
+        }, 300);
+    }, 3000);
+}
 
 // Clear all history
 async function clearAllHistory() {

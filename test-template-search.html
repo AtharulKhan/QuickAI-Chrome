@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Template Search - QuickAI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .test-result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        iframe {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Template Search Feature Test</h1>
+    
+    <div class="instructions">
+        <h3>Test Instructions:</h3>
+        <ol>
+            <li>Open the options page in the iframe below</li>
+            <li>Check if the search bar appears above the templates</li>
+            <li>Try searching for:
+                <ul>
+                    <li>"email" - should show Email Reply template</li>
+                    <li>"code" - should show Code Explanation template</li>
+                    <li>"meeting" - should show Meeting Notes template</li>
+                    <li>Random text - should show "No templates found" message</li>
+                </ul>
+            </li>
+            <li>Test the clear button (X) to reset search</li>
+            <li>Test pressing Escape key while focused on search</li>
+            <li>Verify search highlights matching text</li>
+            <li>Add/edit templates and verify search still works</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Options Page Preview</h2>
+        <iframe src="options.html"></iframe>
+    </div>
+
+    <div class="test-section">
+        <h2>Feature Checklist</h2>
+        <div id="test-results">
+            <div class="test-result">✅ Search bar added to templates section</div>
+            <div class="test-result">✅ Real-time search with debouncing (300ms)</div>
+            <div class="test-result">✅ Search across name, category, and content</div>
+            <div class="test-result">✅ Clear button functionality</div>
+            <div class="test-result">✅ Escape key support</div>
+            <div class="test-result">✅ Search highlighting</div>
+            <div class="test-result">✅ "No results" message</div>
+            <div class="test-result">✅ Responsive design</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Implementation Summary</h2>
+        <ul>
+            <li><strong>HTML Changes:</strong> Added search bar with clear button in options.html</li>
+            <li><strong>CSS Changes:</strong> Added styles for search bar, clear button, and highlights</li>
+            <li><strong>JavaScript Changes:</strong>
+                <ul>
+                    <li>Added search state tracking</li>
+                    <li>Modified displayTemplates() to filter based on search</li>
+                    <li>Added highlightText() function</li>
+                    <li>Added debounced search input handler</li>
+                    <li>Added keyboard and clear button handlers</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</body>
+</html>

@@ -15,6 +15,8 @@ const saveTemplateBtn = document.getElementById('save-template');
 const cancelTemplateBtn = document.getElementById('cancel-template');
 const templatesList = document.getElementById('templates-list');
 const importFileInput = document.getElementById('import-file');
+const templateSearchInput = document.getElementById('template-search');
+const clearTemplateSearchBtn = document.getElementById('clear-template-search');
 
 // Template form fields
 const templateNameInput = document.getElementById('template-name');
@@ -28,6 +30,7 @@ const importAllFileInput = document.getElementById('import-all-file');
 
 // Template state
 let editingTemplateId = null;
+let templateSearchQuery = '';
 
 // Load saved settings
 async function loadSettings() {
@@ -162,9 +165,9 @@ async function loadTemplates() {
         // If no templates exist, initialize with defaults
         if (promptTemplates.length === 0) {
             await chrome.storage.sync.set({ promptTemplates: DEFAULT_TEMPLATES });
-            displayTemplates(DEFAULT_TEMPLATES);
+            displayTemplates(DEFAULT_TEMPLATES, templateSearchQuery);
         } else {
-            displayTemplates(promptTemplates);
+            displayTemplates(promptTemplates, templateSearchQuery);
         }
     } catch (error) {
         console.error('Failed to load templates:', error);
@@ -172,14 +175,29 @@ async function loadTemplates() {
     }
 }
 
-function displayTemplates(templates) {
-    if (templates.length === 0) {
-        templatesList.innerHTML = '<div class="empty-state">No templates yet. Click "Add New Template" to create one.</div>';
+function displayTemplates(templates, searchQuery = '') {
+    // Filter templates based on search query
+    let filteredTemplates = templates;
+    if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        filteredTemplates = templates.filter(template => 
+            template.name.toLowerCase().includes(query) ||
+            (template.category && template.category.toLowerCase().includes(query)) ||
+            template.content.toLowerCase().includes(query)
+        );
+    }
+
+    if (filteredTemplates.length === 0) {
+        if (searchQuery) {
+            templatesList.innerHTML = '<div class="no-results">No templates found matching your search.</div>';
+        } else {
+            templatesList.innerHTML = '<div class="empty-state">No templates yet. Click "Add New Template" to create one.</div>';
+        }
         return;
     }
 
     // Group templates by category
-    const grouped = templates.reduce((acc, template) => {
+    const grouped = filteredTemplates.reduce((acc, template) => {
         const category = template.category || 'Uncategorized';
         if (!acc[category]) acc[category] = [];
         acc[category].push(template);
@@ -189,20 +207,20 @@ function displayTemplates(templates) {
     let html = '';
     for (const [category, categoryTemplates] of Object.entries(grouped)) {
         html += `<div class="template-category">
-            <h4>${category}</h4>
+            <h4>${highlightText(escapeHtml(category), searchQuery)}</h4>
             <div class="template-items">`;
         
         for (const template of categoryTemplates) {
             html += `
                 <div class="template-item" data-id="${template.id}">
                     <div class="template-header">
-                        <h5>${escapeHtml(template.name)}</h5>
+                        <h5>${highlightText(escapeHtml(template.name), searchQuery)}</h5>
                         <div class="template-actions">
                             <button class="edit-template" title="Edit">✏️</button>
                             <button class="delete-template" title="Delete">🗑️</button>
                         </div>
                     </div>
-                    <div class="template-content">${escapeHtml(template.content)}</div>
+                    <div class="template-content">${highlightText(escapeHtml(template.content), searchQuery)}</div>
                 </div>`;
         }
         
@@ -224,6 +242,19 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Highlight search matches
+function highlightText(text, searchQuery) {
+    if (!searchQuery) return text;
+    
+    const regex = new RegExp(`(${escapeRegExp(searchQuery)})`, 'gi');
+    return text.replace(regex, '<span class="highlight">$1</span>');
+}
+
+// Escape regex special characters
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function handleEditTemplate(e) {
@@ -490,6 +521,49 @@ importAllFileInput.addEventListener('change', async (e) => {
         await importAllData(file);
         // Reset input
         e.target.value = '';
+    }
+});
+
+// Debounce function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Search functionality
+const debouncedSearch = debounce(() => {
+    templateSearchQuery = templateSearchInput.value.trim();
+    clearTemplateSearchBtn.style.display = templateSearchQuery ? 'flex' : 'none';
+    loadTemplates();
+}, 300);
+
+templateSearchInput.addEventListener('input', debouncedSearch);
+
+clearTemplateSearchBtn.addEventListener('click', () => {
+    templateSearchInput.value = '';
+    templateSearchQuery = '';
+    clearTemplateSearchBtn.style.display = 'none';
+    loadTemplates();
+});
+
+// Handle Escape key to clear search
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.activeElement === templateSearchInput) {
+        if (templateSearchInput.value) {
+            templateSearchInput.value = '';
+            templateSearchQuery = '';
+            clearTemplateSearchBtn.style.display = 'none';
+            loadTemplates();
+        } else {
+            templateSearchInput.blur();
+        }
     }
 });
 
